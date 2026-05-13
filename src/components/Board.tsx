@@ -1,18 +1,21 @@
+import { CSSProperties } from 'react';
 import { GameState } from '../hooks/useGame';
+import { AppTheme } from '../hooks/useSettings';
 
 interface Props {
   state: GameState;
+  theme: AppTheme;
   onCellClick: (r: number, c: number) => void;
 }
 
-export default function Board({ state, onCellClick }: Props) {
+export default function Board({ state, theme, onCellClick }: Props) {
   const {
     current, errors, selectedCell, selectedNum,
     diagonal, hintPhase, hintTarget, hintConstraintCells,
     status, flashCells,
   } = state;
 
-  function cellClass(r: number, c: number): string {
+  function cellInfo(r: number, c: number): { className: string; style?: CSSProperties } {
     const val = current[r][c];
     const isSelected   = selectedCell?.[0] === r && selectedCell?.[1] === c;
     const isHintTarget = hintTarget?.[0] === r && hintTarget?.[1] === c;
@@ -36,16 +39,19 @@ export default function Board({ state, onCellClick }: Props) {
     const onDiag = diagonal && (r === c || r + c === 8);
 
     let bg = '';
-    if (isFlash)              bg = 'cell-flash';
-    else if (status === 'solved') bg = 'bg-emerald-50';
-    else if (isHintTarget)    bg = 'bg-amber-200';
-    else if (isHintConstr)    bg = 'bg-purple-100';
-    else if (isSelected)      bg = 'bg-blue-500';
-    else if (isError)         bg = 'bg-red-50';
-    else if (isSameVal)       bg = 'bg-blue-100';
-    else if (isPeer)          bg = 'bg-gray-100';
-    else if (onDiag)          bg = 'bg-amber-50';
-    else                      bg = 'bg-white';
+    let style: CSSProperties | undefined;
+
+    if (isFlash)                   bg = 'cell-flash';
+    else if (status === 'solved')  bg = theme.cellSolvedBg;
+    else if (isHintTarget)         bg = 'bg-amber-200';
+    else if (isHintConstr)         bg = 'bg-purple-100';
+    else if (isSelected)           bg = theme.cellSelectedBg;
+    else if (isError)              bg = 'bg-red-50';
+    else if (isSameVal)            bg = theme.cellSameVal;
+    else if (isPeer && onDiag)     style = { background: `linear-gradient(135deg, ${theme.cellDiagColor} 50%, ${theme.cellPeerColor} 50%)` };
+    else if (isPeer)               bg = theme.cellPeer;
+    else if (onDiag)               bg = theme.cellDiagBg;
+    else                           bg = 'bg-white';
 
     let text = '';
     if (isFlash)              text = 'text-emerald-800';
@@ -54,25 +60,30 @@ export default function Board({ state, onCellClick }: Props) {
     else if (isHintConstr)    text = 'text-purple-700';
     else if (isSelected)      text = 'text-white';
     else if (isError)         text = 'text-red-500';
+    else if (isSameVal)       text = theme.cellSameValText;
     else                      text = 'text-gray-800';
 
-    return `flex items-center justify-center w-full h-full select-none cursor-pointer transition-colors text-xl font-semibold ${bg} ${text}`;
+    return {
+      className: `flex items-center justify-center w-full h-full select-none cursor-pointer transition-colors text-xl font-semibold ${bg} ${text}`,
+      style,
+    };
   }
 
   function borderClass(r: number, c: number): string {
-    const rB = c === 2 || c === 5 ? 'border-r-2 border-r-gray-500' : c < 8 ? 'border-r border-r-gray-300' : '';
-    const bB = r === 2 || r === 5 ? 'border-b-2 border-b-gray-500' : r < 8 ? 'border-b border-b-gray-300' : '';
+    const rB = c === 2 || c === 5 ? theme.borderThickR : c < 8 ? theme.borderThinR : '';
+    const bB = r === 2 || r === 5 ? theme.borderThickB : r < 8 ? theme.borderThinB : '';
     return `${rB} ${bB}`;
   }
 
   return (
     <div
-      className="grid w-full border-2 border-gray-500 rounded-sm overflow-hidden shadow-md"
+      className={`grid w-full ${theme.boardBorder} rounded-sm overflow-hidden shadow-md`}
       style={{ gridTemplateColumns: 'repeat(9, 1fr)' }}
     >
       {Array.from({ length: 9 }, (_, r) =>
         Array.from({ length: 9 }, (_, c) => {
           const val = current[r][c];
+          const cell = cellInfo(r, c);
           return (
             <div
               key={`${r}-${c}`}
@@ -80,7 +91,7 @@ export default function Board({ state, onCellClick }: Props) {
               onClick={() => onCellClick(r, c)}
               style={{ touchAction: 'manipulation' }}
             >
-              <div className={cellClass(r, c)}>
+              <div className={cell.className} style={cell.style}>
                 {val > 0 ? val : ''}
               </div>
             </div>

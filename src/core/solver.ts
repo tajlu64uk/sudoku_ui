@@ -51,6 +51,91 @@ export function buildCandidates(grid: Grid, diagonal: boolean): Candidates {
   return V;
 }
 
+function cloneCandidates(V: Candidates): Candidates {
+  return V.map(row => row.map(cell => [...cell]));
+}
+
+// Builds candidates for grid-{(r,c)} incrementally from V (candidates for grid).
+// Only updates the removed cell and its peers — O(peers) instead of O(81×9).
+export function buildCandidatesIncremental(
+  V: Candidates,
+  r: number, c: number, val: number,
+  grid: Grid,
+  diagonal: boolean
+): Candidates {
+  const newV = cloneCandidates(V);
+  const d = val - 1;
+  const [r0, c0] = boxStart(r, c);
+
+  // (r,c) is now empty: compute its candidates from peers in grid (before removal)
+  newV[r][c] = Array(9).fill(true);
+  for (let k = 0; k < 9; k++) {
+    if (k !== c && grid[r][k] > 0) newV[r][c][grid[r][k] - 1] = false;
+    if (k !== r && grid[k][c] > 0) newV[r][c][grid[k][c] - 1] = false;
+  }
+  for (let rr = r0; rr < r0 + 3; rr++)
+    for (let cc = c0; cc < c0 + 3; cc++)
+      if ((rr !== r || cc !== c) && grid[rr][cc] > 0)
+        newV[r][c][grid[rr][cc] - 1] = false;
+  if (diagonal) {
+    if (r === c)
+      for (let k = 0; k < 9; k++)
+        if (k !== r && grid[k][k] > 0) newV[r][c][grid[k][k] - 1] = false;
+    if (r + c === 8)
+      for (let k = 0; k < 9; k++)
+        if (k !== r && grid[k][8 - k] > 0) newV[r][c][grid[k][8 - k] - 1] = false;
+  }
+
+  // For each empty peer of (r,c): digit val may now be available there
+  const tryRestore = (rp: number, cp: number) => {
+    if (grid[rp][cp] !== 0 || newV[rp][cp][d]) return;
+    const [rp0, cp0] = boxStart(rp, cp);
+    for (let k = 0; k < 9; k++) {
+      if (k === cp) continue;
+      if (rp === r && k === c) continue;
+      if (grid[rp][k] === val) return;
+    }
+    for (let k = 0; k < 9; k++) {
+      if (k === rp) continue;
+      if (k === r && cp === c) continue;
+      if (grid[k][cp] === val) return;
+    }
+    for (let rr = rp0; rr < rp0 + 3; rr++)
+      for (let cc = cp0; cc < cp0 + 3; cc++) {
+        if (rr === rp && cc === cp) continue;
+        if (rr === r && cc === c) continue;
+        if (grid[rr][cc] === val) return;
+      }
+    if (diagonal) {
+      if (rp === cp)
+        for (let k = 0; k < 9; k++) {
+          if (k === rp || (k === r && k === c)) continue;
+          if (grid[k][k] === val) return;
+        }
+      if (rp + cp === 8)
+        for (let k = 0; k < 9; k++) {
+          if (k === rp || (k === r && 8 - k === c)) continue;
+          if (grid[k][8 - k] === val) return;
+        }
+    }
+    newV[rp][cp][d] = true;
+  };
+
+  for (let k = 0; k < 9; k++) {
+    if (k !== c) tryRestore(r, k);
+    if (k !== r) tryRestore(k, c);
+  }
+  for (let rr = r0; rr < r0 + 3; rr++)
+    for (let cc = c0; cc < c0 + 3; cc++)
+      if (rr !== r || cc !== c) tryRestore(rr, cc);
+  if (diagonal) {
+    if (r === c) for (let k = 0; k < 9; k++) if (k !== r) tryRestore(k, k);
+    if (r + c === 8) for (let k = 0; k < 9; k++) if (k !== r) tryRestore(k, 8 - k);
+  }
+
+  return newV;
+}
+
 // BapuaHt2 — advanced: naked pairs + box-line reduction
 export function buildCandidatesAdvanced(grid: Grid, diagonal: boolean): Candidates {
   const V = buildCandidates(grid, diagonal);
@@ -211,17 +296,13 @@ interface LogicalInfo {
   count: number;
 }
 
-// Variants2(3,...) internals — build the logical-move matrix
-function buildLogicalInfo(grid: Grid, diagonal: boolean, advanced: boolean): LogicalInfo {
-  const V = advanced ? buildCandidatesAdvanced(grid, diagonal) : buildCandidates(grid, diagonal);
+function buildLogicalD(V: Candidates, diagonal: boolean): { D: number[][], count: number } {
   const D: number[][] = Array.from({ length: 9 }, () => Array(9).fill(0));
 
-  // Level 1
   for (let r = 0; r < 9; r++)
     for (let c = 0; c < 9; c++)
       if (countCands(V, r, c) === 1) D[r][c] = 1;
 
-  // Level 2: hidden single in box
   for (let br = 0; br < 3; br++)
     for (let bc = 0; bc < 3; bc++)
       for (let d = 0; d < 9; d++) {
@@ -235,7 +316,6 @@ function buildLogicalInfo(grid: Grid, diagonal: boolean, advanced: boolean): Log
               if (V[r][c][d]) D[r][c] = 1;
       }
 
-  // Level 3: hidden single in row
   for (let r = 0; r < 9; r++)
     for (let d = 0; d < 9; d++) {
       let cnt = 0;
@@ -243,7 +323,6 @@ function buildLogicalInfo(grid: Grid, diagonal: boolean, advanced: boolean): Log
       if (cnt === 1) for (let c = 0; c < 9; c++) if (V[r][c][d]) D[r][c] = 1;
     }
 
-  // Level 4: hidden single in column
   for (let c = 0; c < 9; c++)
     for (let d = 0; d < 9; d++) {
       let cnt = 0;
@@ -251,7 +330,6 @@ function buildLogicalInfo(grid: Grid, diagonal: boolean, advanced: boolean): Log
       if (cnt === 1) for (let r = 0; r < 9; r++) if (V[r][c][d]) D[r][c] = 1;
     }
 
-  // Level 5: diagonal
   if (diagonal) {
     for (let d = 0; d < 9; d++) {
       let cnt = 0;
@@ -264,12 +342,23 @@ function buildLogicalInfo(grid: Grid, diagonal: boolean, advanced: boolean): Log
   }
 
   const count = D.reduce((s, row) => s + row.reduce((ss, v) => ss + v, 0), 0);
+  return { D, count };
+}
+
+// Variants2(3,...) internals — build the logical-move matrix
+function buildLogicalInfo(grid: Grid, diagonal: boolean, advanced: boolean): LogicalInfo {
+  const V = advanced ? buildCandidatesAdvanced(grid, diagonal) : buildCandidates(grid, diagonal);
+  const { D, count } = buildLogicalD(V, diagonal);
   return { V, D, count };
 }
 
 // Variants2(3,...) — count logically solvable cells
 export function countLogical(grid: Grid, diagonal: boolean, advanced: boolean): number {
   return buildLogicalInfo(grid, diagonal, advanced).count;
+}
+
+export function countLogicalFromV(V: Candidates, diagonal: boolean): number {
+  return buildLogicalD(V, diagonal).count;
 }
 
 // Variants2(7,...) — deterministic: find the first logically forced cell (top-left)
@@ -345,6 +434,45 @@ export function isLogicallyForced(
   return false;
 }
 
+export function isLogicallyForcedFromV(
+  r: number, c: number, val: number,
+  V: Candidates, diagonal: boolean
+): boolean {
+  const d = val - 1;
+  const [r0, c0] = boxStart(r, c);
+
+  if (countCands(V, r, c) === 1 && V[r][c][d]) return true;
+
+  let cnt = 0;
+  for (let rr = r0; rr < r0 + 3; rr++)
+    for (let cc = c0; cc < c0 + 3; cc++)
+      if (V[rr][cc][d]) cnt++;
+  if (cnt === 1) return true;
+
+  cnt = 0;
+  for (let cc = 0; cc < 9; cc++) if (V[r][cc][d]) cnt++;
+  if (cnt === 1 && V[r][c][d]) return true;
+
+  cnt = 0;
+  for (let rr = 0; rr < 9; rr++) if (V[rr][c][d]) cnt++;
+  if (cnt === 1 && V[r][c][d]) return true;
+
+  if (diagonal) {
+    if (r === c) {
+      cnt = 0;
+      for (let k = 0; k < 9; k++) if (V[k][k][d]) cnt++;
+      if (cnt === 1) return true;
+    }
+    if (r + c === 8) {
+      cnt = 0;
+      for (let k = 0; k < 9; k++) if (V[k][8 - k][d]) cnt++;
+      if (cnt === 1) return true;
+    }
+  }
+
+  return false;
+}
+
 // PackPew — can the puzzle be solved by logic alone?
 export function solveLogically(puzzle: Grid, diagonal: boolean, advanced: boolean): boolean {
   const grid = cloneGrid(puzzle);
@@ -390,6 +518,45 @@ export function hasRedundant(
         const p = cloneGrid(puzzle);
         p[r][c] = 0;
         if (isLogicallyForced(r, c, solution[r][c], p, diagonal, advanced)) return true;
+      }
+  return false;
+}
+
+export function countRedundantFromV(
+  puzzle: Grid, solution: Grid,
+  V: Candidates, diagonal: boolean, advanced: boolean
+): number {
+  let cnt = 0;
+  for (let r = 0; r < 9; r++)
+    for (let c = 0; c < 9; c++)
+      if (puzzle[r][c] > 0) {
+        let Vt: Candidates;
+        if (advanced) {
+          const p = cloneGrid(puzzle); p[r][c] = 0;
+          Vt = buildCandidatesAdvanced(p, diagonal);
+        } else {
+          Vt = buildCandidatesIncremental(V, r, c, solution[r][c], puzzle, diagonal);
+        }
+        if (isLogicallyForcedFromV(r, c, solution[r][c], Vt, diagonal)) cnt++;
+      }
+  return cnt;
+}
+
+export function hasRedundantFromV(
+  puzzle: Grid, solution: Grid,
+  V: Candidates, diagonal: boolean, advanced: boolean
+): boolean {
+  for (let r = 0; r < 9; r++)
+    for (let c = 0; c < 9; c++)
+      if (puzzle[r][c] > 0) {
+        let Vt: Candidates;
+        if (advanced) {
+          const p = cloneGrid(puzzle); p[r][c] = 0;
+          Vt = buildCandidatesAdvanced(p, diagonal);
+        } else {
+          Vt = buildCandidatesIncremental(V, r, c, solution[r][c], puzzle, diagonal);
+        }
+        if (isLogicallyForcedFromV(r, c, solution[r][c], Vt, diagonal)) return true;
       }
   return false;
 }

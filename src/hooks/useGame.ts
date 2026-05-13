@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef } from 'react';
 import {
   Grid, cloneGrid, hasConflict, nextLogicalMoveRandom, countNum, getConstrainingCells,
 } from '../core/solver';
-import { generatePuzzle, Difficulty, GenerateResult } from '../core/generator';
+import { generatePuzzle, Difficulty, GenerateResult, ProgressInfo } from '../core/generator';
 
 export type GameStatus = 'idle' | 'playing' | 'solved';
 
@@ -30,6 +30,7 @@ export interface GameState {
   // transient flash after completing a region/digit
   flashCells: [number, number][];
   generating: boolean;
+  generationProgress: ProgressInfo | null;
 }
 
 type Action =
@@ -42,7 +43,8 @@ type Action =
   | { type: 'REDO' }
   | { type: 'CLEAR_FLASH' }
   | { type: 'TICK' }
-  | { type: 'SET_GENERATING'; value: boolean };
+  | { type: 'SET_GENERATING'; value: boolean }
+  | { type: 'SET_PROGRESS'; info: ProgressInfo };
 
 const EMPTY_GRID: Grid = Array.from({ length: 9 }, () => Array(9).fill(0));
 const MAX_HISTORY = 100;
@@ -66,6 +68,7 @@ const initialState: GameState = {
   future: [],
   flashCells: [],
   generating: false,
+  generationProgress: null,
 };
 
 function isSolved(current: Grid, solution: Grid): boolean {
@@ -126,7 +129,10 @@ const HINT_RESET = {
 function reducer(state: GameState, action: Action): GameState {
   switch (action.type) {
     case 'SET_GENERATING':
-      return { ...state, generating: action.value };
+      return { ...state, generating: action.value, generationProgress: action.value ? state.generationProgress : null };
+
+    case 'SET_PROGRESS':
+      return { ...state, generationProgress: action.info };
 
     case 'NEW_GAME': {
       const { puzzle, solution } = action.result;
@@ -351,10 +357,11 @@ export function useGame() {
 
   const startNewGame = useCallback((difficulty: Difficulty, diagonal: boolean) => {
     dispatch({ type: 'SET_GENERATING', value: true });
-    setTimeout(() => {
-      const result = generatePuzzle({ difficulty, diagonal });
+    generatePuzzle({ difficulty, diagonal }, (info) => {
+      dispatch({ type: 'SET_PROGRESS', info });
+    }).then(result => {
       dispatch({ type: 'NEW_GAME', result, difficulty, diagonal });
-    }, 30);
+    });
   }, []);
 
   const selectCell  = useCallback((row: number, col: number) => dispatch({ type: 'SELECT_CELL', row, col }), []);
