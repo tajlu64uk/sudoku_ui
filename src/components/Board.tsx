@@ -1,4 +1,4 @@
-import { CSSProperties } from 'react';
+import { memo, CSSProperties } from 'react';
 import { GameState } from '../hooks/useGame';
 import { AppTheme } from '../hooks/useSettings';
 
@@ -8,11 +8,11 @@ interface Props {
   onCellClick: (r: number, c: number) => void;
 }
 
-export default function Board({ state, theme, onCellClick }: Props) {
+function Board({ state, theme, onCellClick }: Props) {
   const {
     current, errors, selectedCell, selectedNum,
     diagonal, hintPhase, hintTarget, hintConstraintCells,
-    status, flashCells,
+    status, flashCells, rollbackCell,
   } = state;
 
   function cellInfo(r: number, c: number): { className: string; style?: CSSProperties } {
@@ -24,9 +24,10 @@ export default function Board({ state, theme, onCellClick }: Props) {
     const isSameVal    = selectedNum > 0 && val === selectedNum && val > 0 && !isSelected;
     const isFlash      = flashCells.some(([fr, fc]) => fr === r && fc === c);
 
+    const peerRef = selectedCell ?? rollbackCell;
     const isPeer = (() => {
-      if (!selectedCell) return false;
-      const [sr, sc] = selectedCell;
+      if (!peerRef) return false;
+      const [sr, sc] = peerRef;
       if (r === sr || c === sc) return true;
       if (Math.floor(r / 3) === Math.floor(sr / 3) && Math.floor(c / 3) === Math.floor(sc / 3)) return true;
       if (diagonal) {
@@ -47,8 +48,12 @@ export default function Board({ state, theme, onCellClick }: Props) {
     else if (isHintConstr)         bg = 'bg-purple-100';
     else if (isSelected)           bg = theme.cellSelectedBg;
     else if (isError)              bg = 'bg-red-50';
+    else if (isSameVal && onDiag) {
+      const angle = r === c ? '-135deg' : '135deg';
+      style = { background: `linear-gradient(${angle}, ${theme.cellDiagColor} 35%, ${theme.cellSameValColor} 55%)` };
+    }
     else if (isSameVal)            bg = theme.cellSameVal;
-    else if (isPeer && onDiag)     style = { background: `linear-gradient(135deg, ${theme.cellDiagColor} 50%, ${theme.cellPeerColor} 50%)` };
+
     else if (isPeer)               bg = theme.cellPeer;
     else if (onDiag)               bg = theme.cellDiagBg;
     else                           bg = 'bg-white';
@@ -101,3 +106,5 @@ export default function Board({ state, theme, onCellClick }: Props) {
     </div>
   );
 }
+
+export default memo(Board);

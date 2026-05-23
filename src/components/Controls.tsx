@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { GameState, formatTimer } from '../hooks/useGame';
 import { Difficulty } from '../core/generator';
 import { countNum, countLogical } from '../core/solver';
@@ -7,11 +7,14 @@ import { AppTheme } from '../hooks/useSettings';
 interface Props {
   state: GameState;
   theme: AppTheme;
+  timer: number;
   onSelectNum: (n: number) => void;
   onNewGame: (d: Difficulty, diagonal: boolean) => void;
   onHint: () => void;
   onUndo: () => void;
   onRedo: () => void;
+  onRollbackToError: () => void;
+  getShareUrl: () => string;
 }
 
 const DIFFICULTIES: { key: Difficulty; label: string }[] = [
@@ -27,10 +30,22 @@ const HINT_MSGS = [
   'Видите, что мешает другим вариантам?',
 ];
 
-export default function Controls({ state, theme, onSelectNum, onNewGame, onHint, onUndo, onRedo }: Props) {
+export default function Controls({ state, theme, timer, onSelectNum, onNewGame, onHint, onUndo, onRedo, onRollbackToError, getShareUrl }: Props) {
   const [showNewGame, setShowNewGame] = useState(false);
   const [pendingDiff, setPendingDiff] = useState<Difficulty>(state.difficulty);
   const [pendingDiag, setPendingDiag] = useState(state.diagonal);
+  const [copied, setCopied] = useState(false);
+
+  const handleShare = useCallback(async () => {
+    const url = getShareUrl();
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      window.prompt('Ссылка для шаринга:', url);
+    }
+  }, [getShareUrl]);
 
   const handleStart = () => {
     setShowNewGame(false);
@@ -55,7 +70,7 @@ export default function Controls({ state, theme, onSelectNum, onNewGame, onHint,
       <div className="flex md:flex-col items-center justify-between md:justify-start gap-2">
         <div>
           <div className="text-2xl md:text-3xl font-mono text-gray-700 tracking-widest">
-            {formatTimer(state.timer)}
+            {formatTimer(timer)}
           </div>
           {logicalCount && (
             <div className={`text-xs font-mono ${theme.textMuted} text-center`}>
@@ -163,6 +178,26 @@ export default function Controls({ state, theme, onSelectNum, onNewGame, onHint,
             <p className="mt-1 text-xs text-amber-600 text-center">{hintMsg}</p>
           )}
         </div>
+        <div>
+          <button
+            onClick={onRollbackToError}
+            disabled={state.status !== 'playing'}
+            className="w-full py-2.5 rounded-lg text-sm font-medium border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors text-gray-600 touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Найти ошибку
+          </button>
+          {state.noErrorsNotice && (
+            <p className="mt-1 text-xs text-emerald-600 text-center">Ошибок не найдено</p>
+          )}
+        </div>
+        {state.status !== 'idle' && (
+          <button
+            onClick={handleShare}
+            className="py-2.5 rounded-lg text-sm font-medium border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors touch-manipulation text-gray-600"
+          >
+            {copied ? 'Скопировано!' : 'Поделиться'}
+          </button>
+        )}
         <button
           onClick={() => setShowNewGame(v => !v)}
           className="py-2.5 rounded-lg text-sm font-medium border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors text-gray-600 touch-manipulation"

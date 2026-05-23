@@ -580,6 +580,27 @@ export function getConstrainingCells(r: number, c: number, grid: Grid, diagonal:
   return Array.from(seen).map(s => s.split(',').map(Number) as [number, number]);
 }
 
+export function solvePuzzle(puzzle: Grid, diagonal: boolean): Grid | null {
+  const grid = cloneGrid(puzzle);
+  function bt(): boolean {
+    for (let r = 0; r < 9; r++) {
+      for (let c = 0; c < 9; c++) {
+        if (grid[r][c] !== 0) continue;
+        for (let d = 1; d <= 9; d++) {
+          if (!hasConflict(grid, r, c, d, diagonal)) {
+            grid[r][c] = d;
+            if (bt()) return true;
+            grid[r][c] = 0;
+          }
+        }
+        return false;
+      }
+    }
+    return true;
+  }
+  return bt() ? grid : null;
+}
+
 // Check if placing val at (r,c) violates any constraint
 export function hasConflict(grid: Grid, r: number, c: number, val: number, diagonal: boolean): boolean {
   if (val === 0) return false;

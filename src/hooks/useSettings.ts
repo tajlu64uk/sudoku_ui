@@ -4,6 +4,7 @@ export interface AppTheme {
   cellSelectedBg: string;
   cellSameVal: string;
   cellSameValText: string;
+  cellSameValColor: string;
   cellPeer: string;
   cellPeerColor: string;
   cellDiagColor: string;
@@ -26,9 +27,10 @@ const defaultTheme: AppTheme = {
   cellSelectedBg: 'bg-blue-500',
   cellSameVal: 'bg-blue-100',
   cellSameValText: 'text-gray-800',
+  cellSameValColor: '#dbeafe',
   cellPeer: 'bg-gray-100',
   cellPeerColor: '#f3f4f6',
-  cellDiagColor: '#fde68a',
+  cellDiagColor: '#fffbeb',
   cellSolvedBg: 'bg-emerald-50',
   cellDiagBg: 'bg-amber-50',
   numDoneInactive: 'bg-emerald-50 text-emerald-600 border-emerald-300',
@@ -48,6 +50,7 @@ const einkTheme: AppTheme = {
   cellSelectedBg: 'bg-gray-900',
   cellSameVal: 'bg-gray-900',
   cellSameValText: 'text-white',
+  cellSameValColor: '#9ca3af',
   cellPeer: 'bg-gray-200',
   cellPeerColor: '#e5e7eb',
   cellDiagColor: '#fde68a',

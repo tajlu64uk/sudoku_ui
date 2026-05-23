@@ -4,11 +4,18 @@ import { useSettings } from './hooks/useSettings';
 import Board from './components/Board';
 import Controls from './components/Controls';
 import SettingsModal from './components/SettingsModal';
+import { buildShareUrl } from './utils/share';
 
 export default function App() {
-  const { state, startNewGame, selectCell, selectNum, hint, undo, redo } = useGame();
+  const { state, timer, startNewGame, selectCell, selectNum, hint, undo, redo, rollbackToError, dismissPuzzleWarning } = useGame();
   const { settings, set: setSetting, theme } = useSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const getShareUrl = () => buildShareUrl({
+    puzzle: state.status === 'playing' ? state.current : state.puzzle,
+    difficulty: state.difficulty,
+    diagonal: state.diagonal,
+  });
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -54,6 +61,12 @@ export default function App() {
         onSet={setSetting}
       />
 
+      {state.puzzleWarning && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 flex items-center justify-between gap-3 text-sm text-amber-800">
+          <span>{state.puzzleWarning}</span>
+          <button onClick={dismissPuzzleWarning} className="text-amber-600 hover:text-amber-900 shrink-0 leading-none" aria-label="Закрыть">✕</button>
+        </div>
+      )}
       <main className="flex-1 flex items-center justify-center px-3 py-4 md:px-6 md:py-8">
         {state.generating ? (
           <div className="flex flex-col items-center gap-3 w-64">
@@ -84,6 +97,9 @@ export default function App() {
               onHint={hint}
               onUndo={undo}
               onRedo={redo}
+              onRollbackToError={rollbackToError}
+              timer={timer}
+              getShareUrl={getShareUrl}
             />
           </div>
         ) : (
@@ -100,6 +116,9 @@ export default function App() {
                 onHint={hint}
                 onUndo={undo}
                 onRedo={redo}
+                onRollbackToError={rollbackToError}
+              timer={timer}
+              getShareUrl={getShareUrl}
               />
             </div>
           </div>
