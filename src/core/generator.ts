@@ -204,13 +204,16 @@ async function generatePuzzleDouble(
     if (!hasRedundantFromV(A, solution, V_A, diagonal, advanced)) break;
 
     if (countRedundantFromV(A, solution, V_A, diagonal, advanced) < 3) {
-      // Fewer than 3 redundant cells — finish with single removals
+      // Fewer than 3 redundant cells — finish with single removals.
+      // Always rebuild candidates from scratch to avoid stale V_A after each removal.
       for (let r = 0; r < 9; r++)
         for (let c = 0; c < 9; c++)
           if (A[r][c] > 0) {
+            const p = cloneGrid(A);
+            p[r][c] = 0;
             const Vt = advanced
-              ? buildCandidatesAdvanced((() => { const p = cloneGrid(A); p[r][c] = 0; return p; })(), diagonal)
-              : buildCandidatesIncremental(V_A, r, c, A[r][c], A, diagonal);
+              ? buildCandidatesAdvanced(p, diagonal)
+              : buildCandidates(p, diagonal);
             if (isLogicallyForcedFromV(r, c, solution[r][c], Vt, diagonal)) A[r][c] = 0;
           }
       break;
@@ -221,7 +224,7 @@ async function generatePuzzleDouble(
     let bestDelen = -1;
     let found = false;
 
-    for (let r = 0; r < 9; r++) {
+    outerLoop: for (let r = 0; r < 9; r++) {
       for (let c = 0; c < 9; c++) {
         if (A[r][c] === 0) continue;
 
@@ -244,21 +247,37 @@ async function generatePuzzleDouble(
             if (!isLogicallyForcedFromV(r2, c2, solution[r2][c2], V_P2, diagonal)) continue;
 
             const logical = countLogicalFromV(V_P2, diagonal);
-            const delen = countRedundantFromV(P2, solution, V_P2, diagonal, advanced);
 
-            if (!found || logical < bestLogical || (logical === bestLogical && delen > bestDelen)) {
-              bestLogical = logical;
-              bestDelen = delen;
-              bestR1 = r; bestC1 = c;
-              bestR2 = r2; bestC2 = c2;
-              found = true;
+            if (!found || logical <= bestLogical) {
+              const delen = countRedundantFromV(P2, solution, V_P2, diagonal, advanced);
+              if (!found || logical < bestLogical || (logical === bestLogical && delen > bestDelen)) {
+                bestLogical = logical;
+                bestDelen = delen;
+                bestR1 = r; bestC1 = c;
+                bestR2 = r2; bestC2 = c2;
+                found = true;
+                if (logical === 0) break outerLoop;
+              }
             }
           }
         }
       }
     }
 
-    if (!found) break;
+    if (!found) {
+      // No valid pair found, but there may still be individually removable cells.
+      for (let r = 0; r < 9; r++)
+        for (let c = 0; c < 9; c++)
+          if (A[r][c] > 0) {
+            const p = cloneGrid(A);
+            p[r][c] = 0;
+            const Vt = advanced
+              ? buildCandidatesAdvanced(p, diagonal)
+              : buildCandidates(p, diagonal);
+            if (isLogicallyForcedFromV(r, c, solution[r][c], Vt, diagonal)) A[r][c] = 0;
+          }
+      break;
+    }
     A[bestR1][bestC1] = 0;
     A[bestR2][bestC2] = 0;
   }
