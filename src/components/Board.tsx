@@ -1,19 +1,33 @@
-import { memo, CSSProperties } from 'react';
+import { memo, CSSProperties, useMemo } from 'react';
 import { GameState } from '../hooks/useGame';
 import { AppTheme } from '../hooks/useSettings';
+import { buildCandidates, buildCandidatesAdvanced, Candidates } from '../core/solver';
+
+export type CandidateMode = 'none' | 'basic' | 'advanced';
 
 interface Props {
   state: GameState;
   theme: AppTheme;
   onCellClick: (r: number, c: number) => void;
+  candidateMode?: CandidateMode;
 }
 
-function Board({ state, theme, onCellClick }: Props) {
+function Board({ state, theme, onCellClick, candidateMode = 'none' }: Props) {
   const {
     current, errors, selectedCell, selectedNum,
     diagonal, hintPhase, hintTarget, hintConstraintCells,
     status, flashCells, rollbackCell,
   } = state;
+
+  const basicCandidates: Candidates | null = useMemo(
+    () => candidateMode !== 'none' ? buildCandidates(current, diagonal) : null,
+    [candidateMode, current, diagonal]
+  );
+
+  const advancedCandidates: Candidates | null = useMemo(
+    () => candidateMode === 'advanced' ? buildCandidatesAdvanced(current, diagonal) : null,
+    [candidateMode, current, diagonal]
+  );
 
   function cellInfo(r: number, c: number): { className: string; style?: CSSProperties } {
     const val = current[r][c];
@@ -97,7 +111,31 @@ function Board({ state, theme, onCellClick }: Props) {
               style={{ touchAction: 'manipulation' }}
             >
               <div className={cell.className} style={cell.style}>
-                {val > 0 ? val : ''}
+                {val > 0
+                  ? val
+                  : basicCandidates
+                    ? (
+                      <div className="grid w-full h-full p-[1px]" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(3, 1fr)' }}>
+                        {[1,2,3,4,5,6,7,8,9].map(d => {
+                          const inBasic = basicCandidates[r][c][d - 1];
+                          const inAdvanced = advancedCandidates ? advancedCandidates[r][c][d - 1] : inBasic;
+                          const eliminated = inBasic && !inAdvanced;
+                          const highlighted = inAdvanced && selectedNum === d;
+                          return (
+                            <div key={d} className={`flex items-center justify-center rounded-sm ${highlighted ? 'bg-blue-100' : ''}`}>
+                              {inBasic
+                                ? <span className={`text-[11px] leading-none font-medium ${
+                                    eliminated ? 'text-red-400' : highlighted ? 'text-blue-700' : 'text-gray-500'
+                                  }`}>{d}</span>
+                                : null
+                              }
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )
+                    : ''
+                }
               </div>
             </div>
           );

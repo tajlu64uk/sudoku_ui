@@ -3,6 +3,7 @@ import { GameState, formatTimer } from '../hooks/useGame';
 import { Difficulty } from '../core/generator';
 import { countNum, countLogical } from '../core/solver';
 import { AppTheme } from '../hooks/useSettings';
+import { CandidateMode } from './Board';
 
 interface Props {
   state: GameState;
@@ -15,6 +16,8 @@ interface Props {
   onRedo: () => void;
   onRollbackToError: () => void;
   getShareUrl: () => string;
+  candidateMode: CandidateMode;
+  onSetCandidateMode: (mode: CandidateMode) => void;
 }
 
 const DIFFICULTIES: { key: Difficulty; label: string }[] = [
@@ -30,7 +33,7 @@ const HINT_MSGS = [
   'Видите, что мешает другим вариантам?',
 ];
 
-export default function Controls({ state, theme, timer, onSelectNum, onNewGame, onHint, onUndo, onRedo, onRollbackToError, getShareUrl }: Props) {
+export default function Controls({ state, theme, timer, onSelectNum, onNewGame, onHint, onUndo, onRedo, onRollbackToError, getShareUrl, candidateMode, onSetCandidateMode }: Props) {
   const [showNewGame, setShowNewGame] = useState(false);
   const [pendingDiff, setPendingDiff] = useState<Difficulty>(state.difficulty);
   const [pendingDiag, setPendingDiag] = useState(state.diagonal);
@@ -163,32 +166,56 @@ export default function Controls({ state, theme, timer, onSelectNum, onNewGame, 
       {/* Action buttons */}
       <div className="flex flex-col gap-2">
         <div>
-          <button
-            onClick={onHint}
-            disabled={state.status !== 'playing'}
-            className={`w-full py-2.5 rounded-lg text-sm font-medium border transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed ${
-              state.hintPhase > 0
-                ? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
-                : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50 active:bg-gray-100'
-            }`}
-          >
-            {hintLabel}
-          </button>
+          <div className="flex gap-1.5">
+            <button
+              onClick={onHint}
+              disabled={state.status !== 'playing'}
+              className={`flex-1 py-2.5 rounded-lg text-sm font-medium border transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed ${
+                state.hintPhase > 0
+                  ? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
+                  : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50 active:bg-gray-100'
+              }`}
+            >
+              {hintLabel}
+            </button>
+            <button
+              onClick={onRollbackToError}
+              disabled={state.status !== 'playing'}
+              className="flex-1 py-2.5 rounded-lg text-sm font-medium border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors text-gray-600 touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Найти ошибку
+            </button>
+          </div>
           {hintMsg && (
             <p className="mt-1 text-xs text-amber-600 text-center">{hintMsg}</p>
           )}
-        </div>
-        <div>
-          <button
-            onClick={onRollbackToError}
-            disabled={state.status !== 'playing'}
-            className="w-full py-2.5 rounded-lg text-sm font-medium border border-gray-300 bg-white hover:bg-gray-50 active:bg-gray-100 transition-colors text-gray-600 touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            Найти ошибку
-          </button>
           {state.noErrorsNotice && (
             <p className="mt-1 text-xs text-emerald-600 text-center">Ошибок не найдено</p>
           )}
+        </div>
+        <div className="flex gap-1.5">
+          <button
+            onClick={() => onSetCandidateMode(candidateMode === 'basic' ? 'none' : 'basic')}
+            disabled={state.status !== 'playing'}
+            className={`flex-1 py-2.5 rounded-lg text-sm font-medium border transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed ${
+              candidateMode === 'basic'
+                ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100'
+                : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50 active:bg-gray-100'
+            }`}
+          >
+            Варианты
+          </button>
+          <button
+            onClick={() => onSetCandidateMode(candidateMode === 'advanced' ? 'none' : 'advanced')}
+            disabled={state.status !== 'playing'}
+            className={`flex-1 py-2.5 rounded-lg text-sm font-medium border transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed ${
+              candidateMode === 'advanced'
+                ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100'
+                : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50 active:bg-gray-100'
+            }`}
+          >
+            Расш.
+          </button>
         </div>
         {state.status !== 'idle' && (
           <button

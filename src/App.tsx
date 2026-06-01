@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useGame } from './hooks/useGame';
 import { useSettings } from './hooks/useSettings';
-import Board from './components/Board';
+import Board, { CandidateMode } from './components/Board';
 import Controls from './components/Controls';
 import SettingsModal from './components/SettingsModal';
 import { buildShareUrl } from './utils/share';
@@ -10,6 +10,9 @@ export default function App() {
   const { state, timer, startNewGame, selectCell, selectNum, hint, undo, redo, rollbackToError, dismissPuzzleWarning } = useGame();
   const { settings, set: setSetting, theme } = useSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [candidateMode, setCandidateMode] = useState<CandidateMode>('none');
+
+  useEffect(() => { setCandidateMode('none'); }, [state.puzzle]);
 
   const getShareUrl = () => buildShareUrl({
     puzzle: state.status === 'playing' ? state.current : state.puzzle,
@@ -100,12 +103,14 @@ export default function App() {
               onRollbackToError={rollbackToError}
               timer={timer}
               getShareUrl={getShareUrl}
+              candidateMode={candidateMode}
+              onSetCandidateMode={setCandidateMode}
             />
           </div>
         ) : (
           <div className="flex flex-col md:flex-row items-center md:items-start gap-6 md:gap-8 w-full max-w-3xl">
             <div className="w-full max-w-[min(480px,100%)] md:flex-1 md:max-w-[520px]">
-              <Board state={state} theme={theme} onCellClick={selectCell} />
+              <Board state={state} theme={theme} onCellClick={selectCell} candidateMode={candidateMode} />
             </div>
             <div className="w-full md:w-56 md:shrink-0">
               <Controls
@@ -117,8 +122,10 @@ export default function App() {
                 onUndo={undo}
                 onRedo={redo}
                 onRollbackToError={rollbackToError}
-              timer={timer}
-              getShareUrl={getShareUrl}
+                timer={timer}
+                getShareUrl={getShareUrl}
+                candidateMode={candidateMode}
+                onSetCandidateMode={setCandidateMode}
               />
             </div>
           </div>

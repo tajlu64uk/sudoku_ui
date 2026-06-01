@@ -227,7 +227,9 @@ function reducer(state: GameState, action: Action): GameState {
       if (state.status !== 'playing') return state;
 
       if (state.hintPhase === 0) {
-        const move = nextLogicalMoveRandom(state.current, state.diagonal, false);
+        const move =
+          nextLogicalMoveRandom(state.current, state.diagonal, false) ??
+          nextLogicalMoveRandom(state.current, state.diagonal, true);
         if (!move) return state;
         return {
           ...state,
