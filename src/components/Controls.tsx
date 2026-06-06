@@ -18,6 +18,8 @@ interface Props {
   getShareUrl: () => string;
   candidateMode: CandidateMode;
   onSetCandidateMode: (mode: CandidateMode) => void;
+  notesMode: boolean;
+  onToggleNotesMode: () => void;
 }
 
 const DIFFICULTIES: { key: Difficulty; label: string }[] = [
@@ -27,13 +29,16 @@ const DIFFICULTIES: { key: Difficulty; label: string }[] = [
 ];
 
 const HINT_LABELS = ['Подсказка', 'Продолжить', 'Заполнить'];
-const HINT_MSGS = [
-  null,
-  'Найдена клетка для заполнения',
-  'Видите, что мешает другим вариантам?',
-];
+const HINT_MSG_PHASE1 = 'Найдена клетка для заполнения';
+const HINT_METHOD_MSGS: Record<number, string> = {
+  1: 'Единственная цифра, подходящая в эту клетку',
+  2: 'Единственная позиция для цифры в квадрате',
+  3: 'Единственная позиция для цифры в строке',
+  4: 'Единственная позиция для цифры в столбце',
+  5: 'Единственная позиция для цифры на диагонали',
+};
 
-export default function Controls({ state, theme, timer, onSelectNum, onNewGame, onHint, onUndo, onRedo, onRollbackToError, getShareUrl, candidateMode, onSetCandidateMode }: Props) {
+export default function Controls({ state, theme, timer, onSelectNum, onNewGame, onHint, onUndo, onRedo, onRollbackToError, getShareUrl, candidateMode, onSetCandidateMode, notesMode, onToggleNotesMode }: Props) {
   const [showNewGame, setShowNewGame] = useState(false);
   const [pendingDiff, setPendingDiff] = useState<Difficulty>(state.difficulty);
   const [pendingDiag, setPendingDiag] = useState(state.diagonal);
@@ -65,7 +70,11 @@ export default function Controls({ state, theme, timer, onSelectNum, onNewGame, 
   const canUndo = state.history.length > 0 && state.status === 'playing';
   const canRedo = state.future.length > 0;
   const hintLabel = HINT_LABELS[state.hintPhase];
-  const hintMsg   = HINT_MSGS[state.hintPhase];
+  const hintMsg = state.hintPhase === 1
+    ? HINT_MSG_PHASE1
+    : state.hintPhase === 2
+      ? (HINT_METHOD_MSGS[state.hintMethod] ?? 'Видите, что мешает другим вариантам?')
+      : null;
 
   return (
     <div className="flex flex-col gap-4 w-full">
@@ -194,6 +203,17 @@ export default function Controls({ state, theme, timer, onSelectNum, onNewGame, 
           )}
         </div>
         <div className="flex gap-1.5">
+          <button
+            onClick={onToggleNotesMode}
+            disabled={state.status !== 'playing'}
+            className={`flex-1 py-2.5 rounded-lg text-sm font-medium border transition-colors touch-manipulation disabled:opacity-40 disabled:cursor-not-allowed ${
+              notesMode
+                ? 'bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100'
+                : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50 active:bg-gray-100'
+            }`}
+          >
+            Пометки
+          </button>
           <button
             onClick={() => onSetCandidateMode(candidateMode === 'basic' ? 'none' : 'basic')}
             disabled={state.status !== 'playing'}

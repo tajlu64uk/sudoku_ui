@@ -225,6 +225,38 @@ export function buildCandidatesAdvanced(grid: Grid, diagonal: boolean): Candidat
           }
         }
       }
+
+    // Naked pairs on diagonals
+    if (diagonal) {
+      for (let k = 0; k < 9; k++) {
+        if (grid[k][k] !== 0 || countCands(V, k, k) !== 2) continue;
+        for (let k2 = k + 1; k2 < 9; k2++) {
+          if (grid[k2][k2] !== 0 || countCands(V, k2, k2) !== 2) continue;
+          if (!equalCands(V, k, k, k2, k2)) continue;
+          for (let d = 0; d < 9; d++) {
+            if (!V[k][k][d]) continue;
+            for (let kk = 0; kk < 9; kk++) {
+              if (kk === k || kk === k2) continue;
+              if (V[kk][kk][d]) { V[kk][kk][d] = false; changed = true; }
+            }
+          }
+        }
+      }
+      for (let k = 0; k < 9; k++) {
+        if (grid[k][8 - k] !== 0 || countCands(V, k, 8 - k) !== 2) continue;
+        for (let k2 = k + 1; k2 < 9; k2++) {
+          if (grid[k2][8 - k2] !== 0 || countCands(V, k2, 8 - k2) !== 2) continue;
+          if (!equalCands(V, k, 8 - k, k2, 8 - k2)) continue;
+          for (let d = 0; d < 9; d++) {
+            if (!V[k][8 - k][d]) continue;
+            for (let kk = 0; kk < 9; kk++) {
+              if (kk === k || kk === k2) continue;
+              if (V[kk][8 - kk][d]) { V[kk][8 - kk][d] = false; changed = true; }
+            }
+          }
+        }
+      }
+    }
   }
   return V;
 }
@@ -253,21 +285,24 @@ function resolveCellValue(V: Candidates, _grid: Grid, diagonal: boolean, r: numb
     for (let rr = r0; rr < r0 + 3; rr++)
       for (let cc = c0; cc < c0 + 3; cc++)
         if (V[rr][cc][d]) cnt++;
-    if (cnt === 1) return { row: r, col: c, val: d + 1, method: 2 };
+    if (cnt === 1) 
+      return { row: r, col: c, val: d + 1, method: 2 };
   }
 
   // Method 3: only one position in row
   for (let d = 0; d < 9; d++) {
     let cnt = 0;
     for (let cc = 0; cc < 9; cc++) if (V[r][cc][d]) cnt++;
-    if (cnt === 1 && V[r][c][d]) return { row: r, col: c, val: d + 1, method: 3 };
+    if (cnt === 1 && V[r][c][d]) 
+      return { row: r, col: c, val: d + 1, method: 3 };
   }
 
   // Method 4: only one position in column
   for (let d = 0; d < 9; d++) {
     let cnt = 0;
     for (let rr = 0; rr < 9; rr++) if (V[rr][c][d]) cnt++;
-    if (cnt === 1 && V[r][c][d]) return { row: r, col: c, val: d + 1, method: 4 };
+    if (cnt === 1 && V[r][c][d]) 
+      return { row: r, col: c, val: d + 1, method: 4 };
   }
 
   // Method 5: diagonal constraint
@@ -277,12 +312,14 @@ function resolveCellValue(V: Candidates, _grid: Grid, diagonal: boolean, r: numb
       if (r === c) {
         let cnt = 0;
         for (let k = 0; k < 9; k++) if (V[k][k][d]) cnt++;
-        if (cnt === 1) return { row: r, col: c, val: d + 1, method: 5 };
+        if (cnt === 1) 
+          return { row: r, col: c, val: d + 1, method: 5 };
       }
       if (r + c === 8) {
         let cnt = 0;
         for (let k = 0; k < 9; k++) if (V[k][8 - k][d]) cnt++;
-        if (cnt === 1) return { row: r, col: c, val: d + 1, method: 5 };
+        if (cnt === 1) 
+          return { row: r, col: c, val: d + 1, method: 5 };
       }
     }
   }
@@ -578,6 +615,336 @@ export function getConstrainingCells(r: number, c: number, grid: Grid, diagonal:
     if (r + c === 8) for (let k = 0; k < 9; k++) if (k !== r) add(k, 8 - k);
   }
   return Array.from(seen).map(s => s.split(',').map(Number) as [number, number]);
+}
+
+export interface HintCells {
+  constraintCells: [number, number][];
+  altCells: [number, number][];
+}
+
+// Method-specific hint cells, ported from Delphi Button3Click case xz.
+// constraintCells: filled cells explaining WHY val is forced at (r,c).
+// altCells:        empty cells showing WHERE val cannot go (blocked alternatives).
+export function getConstrainingCellsByMethod(
+  r: number, c: number, val: number, method: number,
+  grid: Grid, diagonal: boolean,
+): HintCells {
+  const [r0, c0] = boxStart(r, c);
+  const toList = (s: Set<string>) =>
+    Array.from(s).map(v => v.split(',').map(Number) as [number, number]);
+
+  // Helper: build constraint/alt for a diagonal treated like a virtual row.
+  // positions[k] = [row, col] of the k-th cell on the diagonal.
+  // targetIdx = index of (r,c) in positions.
+  function diagHintCells(
+    positions: [number, number][],
+    targetIdx: number,
+  ): { cs: Set<string>; alt: [number, number][] } {
+    const cs = new Set<string>();
+    const blocked = positions.map(([rr, cc]) => grid[rr][cc] > 0);
+    blocked[targetIdx] = true;
+
+    // Box constraint: each group of 3 consecutive diagonal cells shares a 3×3 box
+    for (let bg = 0; bg < 3; bg++) {
+      const d0 = bg * 3;
+      const anyEmpty = [d0, d0 + 1, d0 + 2].some(
+        i => !blocked[i] && grid[positions[i][0]][positions[i][1]] === 0,
+      );
+      if (!anyEmpty) continue;
+      const [br0, bc0] = boxStart(positions[d0][0], positions[d0][1]);
+      for (let rr = br0; rr < br0 + 3; rr++)
+        for (let cc = bc0; cc < bc0 + 3; cc++)
+          if (grid[rr][cc] === val) {
+            cs.add(`${rr},${cc}`);
+            blocked[d0] = blocked[d0 + 1] = blocked[d0 + 2] = true;
+          }
+    }
+
+    // Row constraint: find val in row of each unblocked position
+    for (let k = 0; k < 9; k++) {
+      if (blocked[k]) continue;
+      const [rr, cc] = positions[k];
+      for (let j = 0; j < 9; j++) {
+        if (j === cc) continue;
+        if (grid[rr][j] === val) {
+          cs.add(`${rr},${j}`);
+          blocked[k] = true;
+          // col j is used by another diagonal position — block it too
+          const pj = positions.findIndex(([, pc]) => pc === j);
+          if (pj >= 0) blocked[pj] = true;
+        }
+      }
+    }
+
+    // Col constraint: find val in col of remaining unblocked positions
+    for (let k = 0; k < 9; k++) {
+      if (blocked[k]) continue;
+      const [rr, cc] = positions[k];
+      for (let i = 0; i < 9; i++) {
+        if (i === rr) continue;
+        if (grid[i][cc] === val) {
+          cs.add(`${i},${cc}`);
+          blocked[k] = true;
+          // row i is used by another diagonal position — block it too
+          const pi = positions.findIndex(([pr]) => pr === i);
+          if (pi >= 0) blocked[pi] = true;
+        }
+      }
+    }
+
+    const alt: [number, number][] = [];
+    for (let k = 0; k < 9; k++)
+      if (!blocked[k] && grid[positions[k][0]][positions[k][1]] === 0)
+        alt.push(positions[k]);
+
+    return { cs, alt };
+  }
+
+  switch (method) {
+    case 1: {
+      // Naked single: one representative cell per blocked digit.
+      // Build regions, sort densest first, then pick digits without repeating.
+      type Region = [number, number][];
+
+      const box: Region = [];
+      for (let rr = r0; rr < r0 + 3; rr++)
+        for (let cc = c0; cc < c0 + 3; cc++)
+          if (rr !== r || cc !== c) box.push([rr, cc]);
+
+      const row: Region = [];
+      for (let cc = 0; cc < 9; cc++) if (cc !== c) row.push([r, cc]);
+
+      const col: Region = [];
+      for (let rr = 0; rr < 9; rr++) if (rr !== r) col.push([rr, c]);
+
+      const regions: Region[] = [box, row, col];
+      if (diagonal) {
+        if (r === c)
+          regions.push(
+            Array.from({ length: 9 }, (_, k): [number, number] => [k, k]).filter(([rr]) => rr !== r),
+          );
+        if (r + c === 8)
+          regions.push(
+            Array.from({ length: 9 }, (_, k): [number, number] => [k, 8 - k]).filter(([rr]) => rr !== r),
+          );
+      }
+
+      // Sort: densest (most filled) region first
+      const filled = (reg: Region) => reg.filter(([rr, cc]) => grid[rr][cc] > 0).length;
+      regions.sort((a, b) => filled(b) - filled(a));
+
+      // Pick all cells from the densest region, then one per unseen digit from the rest
+      const seen = new Set<string>();
+      const shownDigits = new Set<number>([val]);
+      for (const region of regions) {
+        for (const [rr, cc] of region) {
+          const d = grid[rr][cc];
+          if (d > 0 && !shownDigits.has(d)) {
+            seen.add(`${rr},${cc}`);
+            shownDigits.add(d);
+          }
+        }
+      }
+
+      return { constraintCells: toList(seen), altCells: [] };
+    }
+
+    case 2: {
+      // Hidden box: val forced because all other box positions are blocked
+      // Constraint: cells outside box with val that occupy box rows/cols
+      // Alt: other empty cells in box
+      const constraint = new Set<string>();
+      for (let j = 0; j < 3; j++) {
+        const cc = c0 + j;
+        for (let rr = 0; rr < 9; rr++) {
+          if (rr >= r0 && rr < r0 + 3) continue;
+          if (grid[rr][cc] === val) constraint.add(`${rr},${cc}`);
+        }
+      }
+      for (let i = 0; i < 3; i++) {
+        const rr = r0 + i;
+        for (let cc = 0; cc < 9; cc++) {
+          if (cc >= c0 && cc < c0 + 3) continue;
+          if (grid[rr][cc] === val) constraint.add(`${rr},${cc}`);
+        }
+      }
+      const alt: [number, number][] = [];
+      for (let i = 0; i < 3; i++)
+        for (let j = 0; j < 3; j++) {
+          const rr = r0 + i, cc = c0 + j;
+          if ((rr !== r || cc !== c) && grid[rr][cc] === 0) alt.push([rr, cc]);
+        }
+      // Diagonal constraint: if an alt cell is on a diagonal and val appears on it
+      if (diagonal) {
+        for (const [rr, cc] of alt) {
+          if (rr === cc)
+            for (let k = 0; k < 9; k++) if (grid[k][k] === val) constraint.add(`${k},${k}`);
+          if (rr + cc === 8)
+            for (let k = 0; k < 9; k++) if (grid[k][8 - k] === val) constraint.add(`${k},${8 - k}`);
+        }
+      }
+      return { constraintCells: toList(constraint), altCells: alt };
+    }
+
+    case 3: {
+      // Hidden row: val is the only candidate in row r
+      // Box constraint: cell in target's box rows with val blocks 3 columns of the row
+      // Col constraint: cell in column (anywhere) with val blocks that column
+      const constraint = new Set<string>();
+      const colBlocked = Array(9).fill(false);
+      colBlocked[c] = true;
+      for (let cc = 0; cc < 9; cc++) if (grid[r][cc] > 0) colBlocked[cc] = true;
+
+      for (let bc = 0; bc < 3; bc++) {
+        const cc0 = bc * 3;
+        for (let i = 0; i < 3; i++)
+          for (let j = 0; j < 3; j++) {
+            const rr = r0 + i, cc = cc0 + j;
+            if (rr === r) continue;
+            if (grid[rr][cc] === val) {
+              constraint.add(`${rr},${cc}`);
+              colBlocked[cc0] = colBlocked[cc0 + 1] = colBlocked[cc0 + 2] = true;
+            }
+          }
+      }
+      for (let cc = 0; cc < 9; cc++) {
+        if (colBlocked[cc]) continue;
+        for (let rr = 0; rr < 9; rr++) {
+          if (rr !== r && grid[rr][cc] === val) { constraint.add(`${rr},${cc}`); colBlocked[cc] = true; }
+        }
+      }
+      // Diagonal constraint: if cell (r, cc) lies on a diagonal, val on that diagonal blocks it
+      if (diagonal) {
+        for (let cc = 0; cc < 9; cc++) {
+          if (colBlocked[cc]) continue;
+          if (r === cc)
+            for (let k = 0; k < 9; k++)
+              if (grid[k][k] === val) { constraint.add(`${k},${k}`); colBlocked[cc] = true; }
+          if (!colBlocked[cc] && r + cc === 8)
+            for (let k = 0; k < 9; k++)
+              if (grid[k][8 - k] === val) { constraint.add(`${k},${8 - k}`); colBlocked[cc] = true; }
+        }
+      }
+      const alt: [number, number][] = [];
+      for (let cc = 0; cc < 9; cc++)
+        if (cc !== c && grid[r][cc] === 0) alt.push([r, cc]);
+      return { constraintCells: toList(constraint), altCells: alt };
+    }
+
+    case 4: {
+      // Hidden col: val is the only candidate in col c
+      const constraint = new Set<string>();
+      const rowBlocked = Array(9).fill(false);
+      rowBlocked[r] = true;
+      for (let rr = 0; rr < 9; rr++) if (grid[rr][c] > 0) rowBlocked[rr] = true;
+
+      for (let br = 0; br < 3; br++) {
+        const rr0 = br * 3;
+        for (let i = 0; i < 3; i++)
+          for (let j = 0; j < 3; j++) {
+            const rr = rr0 + i, cc = c0 + j;
+            if (cc === c) continue;
+            if (grid[rr][cc] === val) {
+              constraint.add(`${rr},${cc}`);
+              rowBlocked[rr0] = rowBlocked[rr0 + 1] = rowBlocked[rr0 + 2] = true;
+            }
+          }
+      }
+      for (let rr = 0; rr < 9; rr++) {
+        if (rowBlocked[rr]) continue;
+        for (let cc = 0; cc < 9; cc++) {
+          if (cc !== c && grid[rr][cc] === val) { constraint.add(`${rr},${cc}`); rowBlocked[rr] = true; }
+        }
+      }
+      // Diagonal constraint: if (rr,c) lies on a diagonal, val on that diagonal blocks it
+      if (diagonal) {
+        for (let rr = 0; rr < 9; rr++) {
+          if (rowBlocked[rr]) continue;
+          if (rr === c) {
+            for (let k = 0; k < 9; k++)
+              if (grid[k][k] === val) { constraint.add(`${k},${k}`); rowBlocked[rr] = true; }
+          }
+          if (!rowBlocked[rr] && rr + c === 8) {
+            for (let k = 0; k < 9; k++)
+              if (grid[k][8 - k] === val) { constraint.add(`${k},${8 - k}`); rowBlocked[rr] = true; }
+          }
+        }
+      }
+      const alt: [number, number][] = [];
+      for (let rr = 0; rr < 9; rr++)
+        if (rr !== r && grid[rr][c] === 0) alt.push([rr, c]);
+      return { constraintCells: toList(constraint), altCells: alt };
+    }
+
+    case 5: {
+      // Diagonal: val is the only candidate on one (or both) diagonals.
+      // Re-derive which diagonal(s) actually force val here — don't trust r===c alone,
+      // since the center cell (4,4) lies on both and either could be the forcing one.
+      const mainDiag = Array.from({ length: 9 }, (_, k) => [k, k] as [number, number]);
+      const antiDiag = Array.from({ length: 9 }, (_, k) => [k, 8 - k] as [number, number]);
+
+      const V = buildCandidates(grid, diagonal);
+      const d = val - 1;
+
+      let useMain = false;
+      if (r === c) {
+        let cnt = 0;
+        for (let k = 0; k < 9; k++) if (V[k][k][d]) cnt++;
+        if (cnt === 1) useMain = true;
+      }
+      let useAnti = false;
+      if (r + c === 8) {
+        let cnt = 0;
+        for (let k = 0; k < 9; k++) if (V[k][8 - k][d]) cnt++;
+        if (cnt === 1) useAnti = true;
+      }
+      // Fallback: if basic candidates don't confirm, try advanced
+      if (!useMain && !useAnti) {
+        const Va = buildCandidatesAdvanced(grid, diagonal);
+        if (r === c) {
+          let cnt = 0;
+          for (let k = 0; k < 9; k++) if (Va[k][k][d]) cnt++;
+          if (cnt === 1) useMain = true;
+        }
+        if (r + c === 8) {
+          let cnt = 0;
+          for (let k = 0; k < 9; k++) if (Va[k][8 - k][d]) cnt++;
+          if (cnt === 1) useAnti = true;
+        }
+      }
+
+      const constraint = new Set<string>();
+      const altSet = new Set<string>();
+
+      if (useMain) {
+        const { cs } = diagHintCells(mainDiag, r);
+        for (const x of cs) constraint.add(x);
+        // Center cell is also on anti-diagonal — if unblocked, check it
+        if (grid[4][4] === 0 && !(r === 4 && c === 4))
+          for (let k = 0; k < 9; k++) if (grid[k][8 - k] === val) constraint.add(`${k},${8 - k}`);
+        for (const [rr, cc] of mainDiag)
+          if (!(rr === r && cc === c) && grid[rr][cc] === 0) altSet.add(`${rr},${cc}`);
+      }
+
+      if (useAnti) {
+        const { cs } = diagHintCells(antiDiag, r);
+        for (const x of cs) constraint.add(x);
+        // Center cell is also on main diagonal — if unblocked, check it
+        if (grid[4][4] === 0 && !(r === 4 && c === 4))
+          for (let k = 0; k < 9; k++) if (grid[k][k] === val) constraint.add(`${k},${k}`);
+        for (const [rr, cc] of antiDiag)
+          if (!(rr === r && cc === c) && grid[rr][cc] === 0) altSet.add(`${rr},${cc}`);
+      }
+
+      return {
+        constraintCells: toList(constraint),
+        altCells: Array.from(altSet).map(s => s.split(',').map(Number) as [number, number]),
+      };
+    }
+
+    default:
+      return { constraintCells: getConstrainingCells(r, c, grid, diagonal), altCells: [] };
+  }
 }
 
 export function solvePuzzle(puzzle: Grid, diagonal: boolean): Grid | null {

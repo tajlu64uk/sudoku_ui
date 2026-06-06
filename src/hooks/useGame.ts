@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import {
-  Grid, cloneGrid, hasConflict, nextLogicalMoveRandom, countNum, getConstrainingCells, solvePuzzle,
+  Grid, cloneGrid, hasConflict, nextLogicalMoveRandom, countNum, getConstrainingCellsByMethod, solvePuzzle,
 } from '../core/solver';
 import { generatePuzzle, Difficulty, GenerateResult, ProgressInfo } from '../core/generator';
 import { readShareParam, decodeShare, clearShareParam } from '../utils/share';
 
 export type GameStatus = 'idle' | 'playing' | 'solved';
+export type Notes = boolean[][][]; // [row][col][digit-1]
 
 interface Snapshot { current: Grid; errors: Grid; }
 
@@ -22,7 +23,9 @@ export interface GameState {
   hintPhase: 0 | 1 | 2;
   hintTarget: [number, number] | null;
   hintValue: number;
+  hintMethod: number;
   hintConstraintCells: [number, number][];
+  hintAltCells: [number, number][];
   // undo / redo
   history: Snapshot[];
   future: Snapshot[];
@@ -33,6 +36,8 @@ export interface GameState {
   noErrorsNotice: boolean;
   rollbackCell: [number, number] | null;
   puzzleWarning: string | null;
+  notes: Notes;
+  notesMode: boolean;
 }
 
 type Action =
@@ -40,6 +45,8 @@ type Action =
   | { type: 'SELECT_CELL'; row: number; col: number }
   | { type: 'SELECT_NUM'; num: number }
   | { type: 'ENTER_VALUE'; row: number; col: number; val: number }
+  | { type: 'TOGGLE_NOTE'; row: number; col: number; digit: number }
+  | { type: 'TOGGLE_NOTES_MODE' }
   | { type: 'HINT' }
   | { type: 'UNDO' }
   | { type: 'REDO' }
@@ -51,6 +58,12 @@ type Action =
   | { type: 'DISMISS_PUZZLE_WARNING' };
 
 const EMPTY_GRID: Grid = Array.from({ length: 9 }, () => Array(9).fill(0));
+
+function emptyNotes(): Notes {
+  return Array.from({ length: 9 }, () =>
+    Array.from({ length: 9 }, () => Array(9).fill(false))
+  );
+}
 
 const MAX_HISTORY = 100;
 
@@ -66,7 +79,9 @@ const initialState: GameState = {
   hintPhase: 0,
   hintTarget: null,
   hintValue: 0,
+  hintMethod: 0,
   hintConstraintCells: [],
+  hintAltCells: [],
   history: [],
   future: [],
   flashCells: [],
@@ -75,6 +90,8 @@ const initialState: GameState = {
   noErrorsNotice: false,
   rollbackCell: null,
   puzzleWarning: null,
+  notes: emptyNotes(),
+  notesMode: false,
 };
 
 function isSolved(current: Grid, diagonal: boolean): boolean {
@@ -138,7 +155,9 @@ const HINT_RESET = {
   hintPhase: 0 as const,
   hintTarget: null,
   hintValue: 0,
+  hintMethod: 0,
   hintConstraintCells: [] as [number, number][],
+  hintAltCells: [] as [number, number][],
 };
 
 function reducer(state: GameState, action: Action): GameState {
@@ -169,6 +188,11 @@ function reducer(state: GameState, action: Action): GameState {
     case 'SELECT_CELL': {
       const { row, col } = action;
       if (state.puzzle[row][col] > 0) return state; // given cell — ignore
+      if (state.status === 'playing' && state.notesMode) {
+        if (state.selectedNum > 0)
+          return reducer(state, { type: 'TOGGLE_NOTE', row, col, digit: state.selectedNum });
+        return { ...state, selectedCell: [row, col] };
+      }
       if (state.status === 'playing') {
         if (state.selectedNum > 0)
           return reducer(state, { type: 'ENTER_VALUE', row, col, val: state.selectedNum });
@@ -181,10 +205,39 @@ function reducer(state: GameState, action: Action): GameState {
       const { num } = action;
       if (state.selectedCell && state.status === 'playing') {
         const [r, c] = state.selectedCell;
-        if (state.puzzle[r][c] === 0)
+        if (state.puzzle[r][c] === 0) {
+          if (state.notesMode && num > 0)
+            return reducer({ ...state, selectedNum: num, ...HINT_RESET }, { type: 'TOGGLE_NOTE', row: r, col: c, digit: num });
+          if (state.notesMode && num === 0) {
+            // eraser in notes mode: clear all notes for selected cell
+            const notes = state.notes.map((nr, ri) =>
+              nr.map((cell, ci) => ri === r && ci === c ? Array(9).fill(false) as boolean[] : cell)
+            );
+            return { ...state, selectedNum: 0, ...HINT_RESET, notes };
+          }
           return reducer({ ...state, selectedNum: num, ...HINT_RESET }, { type: 'ENTER_VALUE', row: r, col: c, val: num });
+        }
       }
       return { ...state, selectedNum: num, ...HINT_RESET };
+    }
+
+    case 'TOGGLE_NOTES_MODE':
+      return { ...state, notesMode: !state.notesMode };
+
+    case 'TOGGLE_NOTE': {
+      const { row, col, digit } = action;
+      if (state.puzzle[row][col] !== 0) return state;
+      if (state.current[row][col] !== 0) return state;
+      const notes = state.notes.map((nr, ri) =>
+        nr.map((cell, ci) =>
+          ri === row && ci === col
+            ? cell.map((v, di) => di === digit - 1 ? !v : v) as boolean[]
+            : cell
+        )
+      );
+      const newState: GameState = { ...state, notes };
+      persist(newState);
+      return newState;
     }
 
     case 'ENTER_VALUE': {
@@ -231,17 +284,22 @@ function reducer(state: GameState, action: Action): GameState {
           nextLogicalMoveRandom(state.current, state.diagonal, false) ??
           nextLogicalMoveRandom(state.current, state.diagonal, true);
         if (!move) return state;
+        const { constraintCells, altCells } = getConstrainingCellsByMethod(
+          move.row, move.col, move.val, move.method, state.current, state.diagonal,
+        );
         return {
           ...state,
           hintPhase: 1,
           hintTarget: [move.row, move.col],
           hintValue: move.val,
-          hintConstraintCells: getConstrainingCells(move.row, move.col, state.current, state.diagonal),
+          hintMethod: move.method,
+          hintConstraintCells: constraintCells,
+          hintAltCells: altCells,
         };
       }
 
       if (state.hintPhase === 1) {
-        return { ...state, hintPhase: 2 };
+        return { ...state, hintPhase: 2, selectedNum: 0 };
       }
 
       // phase 2 → fill
@@ -265,6 +323,7 @@ function reducer(state: GameState, action: Action): GameState {
         ...HINT_RESET,
         flashCells,
         rollbackCell: null,
+        selectedNum: hintValue,
         status: solved ? 'solved' : 'playing',
       };
       persist(newState);
@@ -394,8 +453,8 @@ function saveTimer(t: number) {
 
 function persist(state: GameState) {
   try {
-    const { generating, flashCells, hintConstraintCells, noErrorsNotice, rollbackCell, puzzleWarning, ...rest } = state;
-    void generating; void flashCells; void hintConstraintCells; void noErrorsNotice; void rollbackCell; void puzzleWarning;
+    const { generating, flashCells, hintConstraintCells, hintAltCells, noErrorsNotice, rollbackCell, puzzleWarning, notesMode, ...rest } = state;
+    void generating; void flashCells; void hintConstraintCells; void hintAltCells; void noErrorsNotice; void rollbackCell; void puzzleWarning; void notesMode;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
   } catch { /* quota exceeded */ }
 }
@@ -429,6 +488,7 @@ function buildInitialState(): GameState {
           : null,
       };
       persist(state);
+      saveTimer(0);
       return state;
     }
   }
@@ -439,7 +499,9 @@ function buildInitialState(): GameState {
     hintPhase: 0,
     hintTarget: null,
     hintValue: 0,
+    hintMethod: 0,
     hintConstraintCells: [],
+    hintAltCells: [],
     history: saved?.history ?? [],
     future: saved?.future ?? [],
     flashCells: [],
@@ -448,6 +510,8 @@ function buildInitialState(): GameState {
     noErrorsNotice: false,
     rollbackCell: null,
     status: saved?.status === 'playing' ? 'playing' : saved?.status === 'solved' ? 'solved' : 'idle',
+    notes: saved?.notes ?? emptyNotes(),
+    notesMode: false,
   };
 }
 
@@ -502,8 +566,9 @@ export function useGame() {
   const redo                 = useCallback(() => dispatch({ type: 'REDO' }), []);
   const rollbackToError      = useCallback(() => dispatch({ type: 'ROLLBACK_TO_ERROR' }), []);
   const dismissPuzzleWarning = useCallback(() => dispatch({ type: 'DISMISS_PUZZLE_WARNING' }), []);
+  const toggleNotesMode      = useCallback(() => dispatch({ type: 'TOGGLE_NOTES_MODE' }), []);
 
-  return { state, timer, startNewGame, selectCell, selectNum, hint, undo, redo, rollbackToError, dismissPuzzleWarning };
+  return { state, timer, startNewGame, selectCell, selectNum, hint, undo, redo, rollbackToError, dismissPuzzleWarning, toggleNotesMode };
 }
 
 export function formatTimer(seconds: number): string {

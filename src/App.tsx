@@ -7,7 +7,7 @@ import SettingsModal from './components/SettingsModal';
 import { buildShareUrl } from './utils/share';
 
 export default function App() {
-  const { state, timer, startNewGame, selectCell, selectNum, hint, undo, redo, rollbackToError, dismissPuzzleWarning } = useGame();
+  const { state, timer, startNewGame, selectCell, selectNum, hint, undo, redo, rollbackToError, dismissPuzzleWarning, toggleNotesMode } = useGame();
   const { settings, set: setSetting, theme } = useSettings();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [candidateMode, setCandidateMode] = useState<CandidateMode>('none');
@@ -105,12 +105,14 @@ export default function App() {
               getShareUrl={getShareUrl}
               candidateMode={candidateMode}
               onSetCandidateMode={setCandidateMode}
+              notesMode={state.notesMode}
+              onToggleNotesMode={toggleNotesMode}
             />
           </div>
         ) : (
           <div className="flex flex-col md:flex-row items-center md:items-start gap-6 md:gap-8 w-full max-w-3xl">
             <div className="w-full max-w-[min(480px,100%)] md:flex-1 md:max-w-[520px]">
-              <Board state={state} theme={theme} onCellClick={selectCell} candidateMode={candidateMode} />
+              <Board state={state} theme={theme} onCellClick={selectCell} candidateMode={candidateMode} notes={state.notes} />
             </div>
             <div className="w-full md:w-56 md:shrink-0">
               <Controls
@@ -126,6 +128,8 @@ export default function App() {
                 getShareUrl={getShareUrl}
                 candidateMode={candidateMode}
                 onSetCandidateMode={setCandidateMode}
+                notesMode={state.notesMode}
+                onToggleNotesMode={toggleNotesMode}
               />
             </div>
           </div>

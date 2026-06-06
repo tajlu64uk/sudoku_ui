@@ -1,5 +1,5 @@
 import { memo, CSSProperties, useMemo } from 'react';
-import { GameState } from '../hooks/useGame';
+import { GameState, Notes } from '../hooks/useGame';
 import { AppTheme } from '../hooks/useSettings';
 import { buildCandidates, buildCandidatesAdvanced, Candidates } from '../core/solver';
 
@@ -10,12 +10,13 @@ interface Props {
   theme: AppTheme;
   onCellClick: (r: number, c: number) => void;
   candidateMode?: CandidateMode;
+  notes: Notes;
 }
 
-function Board({ state, theme, onCellClick, candidateMode = 'none' }: Props) {
+function Board({ state, theme, onCellClick, candidateMode = 'none', notes }: Props) {
   const {
     current, errors, selectedCell, selectedNum,
-    diagonal, hintPhase, hintTarget, hintConstraintCells,
+    diagonal, hintPhase, hintTarget, hintConstraintCells, hintAltCells,
     status, flashCells, rollbackCell,
   } = state;
 
@@ -34,6 +35,7 @@ function Board({ state, theme, onCellClick, candidateMode = 'none' }: Props) {
     const isSelected   = selectedCell?.[0] === r && selectedCell?.[1] === c;
     const isHintTarget = hintTarget?.[0] === r && hintTarget?.[1] === c;
     const isHintConstr = hintPhase === 2 && hintConstraintCells.some(([hr, hc]) => hr === r && hc === c);
+    const isHintAlt    = hintPhase === 2 && hintAltCells.some(([hr, hc]) => hr === r && hc === c);
     const isError      = errors[r][c] === 1;
     const isSameVal    = selectedNum > 0 && val === selectedNum && val > 0 && !isSelected;
     const isFlash      = flashCells.some(([fr, fc]) => fr === r && fc === c);
@@ -59,7 +61,16 @@ function Board({ state, theme, onCellClick, candidateMode = 'none' }: Props) {
     if (isFlash)                   bg = 'cell-flash';
     else if (status === 'solved')  bg = theme.cellSolvedBg;
     else if (isHintTarget)         bg = 'bg-amber-200';
+    else if (isHintConstr && onDiag) {
+      const angle = r === c ? '-135deg' : '135deg';
+      style = { background: `linear-gradient(${angle}, ${theme.cellDiagColor} 35%, #f3e8ff 55%)` };
+    }
     else if (isHintConstr)         bg = 'bg-purple-100';
+    else if (isHintAlt && onDiag) {
+      const angle = r === c ? '-135deg' : '135deg';
+      style = { background: `linear-gradient(${angle}, ${theme.cellDiagColor} 35%, #f0f9ff 55%)` };
+    }
+    else if (isHintAlt)            bg = 'bg-sky-50';
     else if (isSelected)           bg = theme.cellSelectedBg;
     else if (isError)              bg = 'bg-red-50';
     else if (isSameVal && onDiag) {
@@ -77,6 +88,7 @@ function Board({ state, theme, onCellClick, candidateMode = 'none' }: Props) {
     else if (status === 'solved') text = 'text-emerald-700';
     else if (isHintTarget)    text = 'text-amber-800';
     else if (isHintConstr)    text = 'text-purple-700';
+    else if (isHintAlt)       text = 'text-sky-600';
     else if (isSelected)      text = 'text-white';
     else if (isError)         text = 'text-red-500';
     else if (isSameVal)       text = theme.cellSameValText;
@@ -115,26 +127,34 @@ function Board({ state, theme, onCellClick, candidateMode = 'none' }: Props) {
                   ? val
                   : basicCandidates
                     ? (
-                      <div className="grid w-full h-full p-[1px]" style={{ gridTemplateColumns: 'repeat(3, 1fr)', gridTemplateRows: 'repeat(3, 1fr)' }}>
-                        {[1,2,3,4,5,6,7,8,9].map(d => {
-                          const inBasic = basicCandidates[r][c][d - 1];
-                          const inAdvanced = advancedCandidates ? advancedCandidates[r][c][d - 1] : inBasic;
-                          const eliminated = inBasic && !inAdvanced;
-                          const highlighted = inAdvanced && selectedNum === d;
+                      <div className="flex flex-wrap content-start justify-end w-full h-full p-[2px]">
+                        {[1,2,3,4,5,6,7,8,9].filter(d => basicCandidates[r][c][d - 1]).map(d => {
+                          const inAdvanced = advancedCandidates ? advancedCandidates[r][c][d - 1] : true;
+                          const eliminated = !inAdvanced;
+                          const highlighted = selectedNum === d;
                           return (
-                            <div key={d} className={`flex items-center justify-center rounded-sm ${highlighted ? 'bg-blue-100' : ''}`}>
-                              {inBasic
-                                ? <span className={`text-[11px] leading-none font-medium ${
-                                    eliminated ? 'text-red-400' : highlighted ? 'text-blue-700' : 'text-gray-500'
-                                  }`}>{d}</span>
-                                : null
-                              }
-                            </div>
+                            <span
+                              key={d}
+                              style={{ width: '25%' }}
+                              className={`text-center text-[11px] leading-[1.2] font-medium ${highlighted ? 'bg-blue-100 rounded-sm text-blue-700' : eliminated ? 'text-red-400' : 'text-gray-500'}`}
+                            >{d}</span>
                           );
                         })}
                       </div>
                     )
-                    : ''
+                    : notes[r][c].some(Boolean)
+                      ? (
+                        <div className="flex flex-wrap content-start justify-end w-full h-full p-[2px]">
+                          {[1,2,3,4,5,6,7,8,9].filter(d => notes[r][c][d - 1]).map(d => (
+                            <span
+                              key={d}
+                              style={{ width: '25%' }}
+                              className={`text-center text-[11px] leading-[1.2] font-medium ${selectedNum === d ? 'text-blue-600' : 'text-gray-400'}`}
+                            >{d}</span>
+                          ))}
+                        </div>
+                      )
+                      : ''
                 }
               </div>
             </div>
