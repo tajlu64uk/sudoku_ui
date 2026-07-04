@@ -256,7 +256,8 @@ async function generatePuzzleDouble(
                 bestR1 = r; bestC1 = c;
                 bestR2 = r2; bestC2 = c2;
                 found = true;
-                if (logical === 0) break outerLoop;
+                if (logical === 0) 
+                  break outerLoop;
               }
             }
           }

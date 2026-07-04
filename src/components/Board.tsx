@@ -136,7 +136,7 @@ function Board({ state, theme, onCellClick, candidateMode = 'none', notes }: Pro
                             <span
                               key={d}
                               style={{ width: '25%' }}
-                              className={`text-center text-[11px] leading-[1.2] font-medium ${highlighted ? 'bg-blue-100 rounded-sm text-blue-700' : eliminated ? 'text-red-400' : 'text-gray-500'}`}
+                              className={`text-center text-[11px] leading-[1.2] font-medium ${highlighted ? 'bg-blue-100 rounded-sm' : ''} ${eliminated ? 'text-red-400' : highlighted ? 'text-blue-700' : 'text-gray-500'}`}
                             >{d}</span>
                           );
                         })}
