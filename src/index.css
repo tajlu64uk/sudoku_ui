@@ -12,6 +12,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+header {
+  padding-top: max(1rem, env(safe-area-inset-top));
+}
+
 @keyframes cell-flash {
   0%   { background-color: #bbf7d0; }
   45%  { background-color: #4ade80; }

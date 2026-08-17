@@ -1,35 +1,43 @@
-import { useCallback, useEffect, useReducer, useRef } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import {
-  Grid, cloneGrid, hasConflict, nextLogicalMoveRandom, countNum, getConstrainingCells,
+  Grid, cloneGrid, hasConflict, nextLogicalMoveRandom, countNum, getConstrainingCellsByMethod, solvePuzzle,
 } from '../core/solver';
-import { generatePuzzle, Difficulty, GenerateResult } from '../core/generator';
+import { generatePuzzle, Difficulty, GenerateResult, ProgressInfo } from '../core/generator';
+import { readShareParam, decodeShare, clearShareParam } from '../utils/share';
 
 export type GameStatus = 'idle' | 'playing' | 'solved';
+export type Notes = boolean[][][]; // [row][col][digit-1]
 
 interface Snapshot { current: Grid; errors: Grid; }
 
 export interface GameState {
   puzzle: Grid;
-  solution: Grid;
   current: Grid;
   selectedCell: [number, number] | null;
   selectedNum: number;
   diagonal: boolean;
   difficulty: Difficulty;
   status: GameStatus;
-  timer: number;
   errors: Grid;
   // multi-step hint
   hintPhase: 0 | 1 | 2;
   hintTarget: [number, number] | null;
   hintValue: number;
+  hintMethod: number;
   hintConstraintCells: [number, number][];
+  hintAltCells: [number, number][];
   // undo / redo
   history: Snapshot[];
   future: Snapshot[];
   // transient flash after completing a region/digit
   flashCells: [number, number][];
   generating: boolean;
+  generationProgress: ProgressInfo | null;
+  noErrorsNotice: boolean;
+  rollbackCell: [number, number] | null;
+  puzzleWarning: string | null;
+  notes: Notes;
+  notesMode: boolean;
 }
 
 type Action =
@@ -37,41 +45,68 @@ type Action =
   | { type: 'SELECT_CELL'; row: number; col: number }
   | { type: 'SELECT_NUM'; num: number }
   | { type: 'ENTER_VALUE'; row: number; col: number; val: number }
+  | { type: 'TOGGLE_NOTE'; row: number; col: number; digit: number }
+  | { type: 'TOGGLE_NOTES_MODE' }
   | { type: 'HINT' }
   | { type: 'UNDO' }
   | { type: 'REDO' }
   | { type: 'CLEAR_FLASH' }
-  | { type: 'TICK' }
-  | { type: 'SET_GENERATING'; value: boolean };
+  | { type: 'SET_GENERATING'; value: boolean }
+  | { type: 'SET_PROGRESS'; info: ProgressInfo }
+  | { type: 'ROLLBACK_TO_ERROR' }
+  | { type: 'CLEAR_NO_ERRORS_NOTICE' }
+  | { type: 'DISMISS_PUZZLE_WARNING' };
 
 const EMPTY_GRID: Grid = Array.from({ length: 9 }, () => Array(9).fill(0));
+
+function emptyNotes(): Notes {
+  return Array.from({ length: 9 }, () =>
+    Array.from({ length: 9 }, () => Array(9).fill(false))
+  );
+}
+
 const MAX_HISTORY = 100;
 
 const initialState: GameState = {
   puzzle: EMPTY_GRID,
-  solution: EMPTY_GRID,
   current: EMPTY_GRID,
   selectedCell: null,
   selectedNum: 1,
   diagonal: false,
   difficulty: 'easy',
   status: 'idle',
-  timer: 0,
   errors: EMPTY_GRID,
   hintPhase: 0,
   hintTarget: null,
   hintValue: 0,
+  hintMethod: 0,
   hintConstraintCells: [],
+  hintAltCells: [],
   history: [],
   future: [],
   flashCells: [],
   generating: false,
+  generationProgress: null,
+  noErrorsNotice: false,
+  rollbackCell: null,
+  puzzleWarning: null,
+  notes: emptyNotes(),
+  notesMode: false,
 };
 
-function isSolved(current: Grid, solution: Grid): boolean {
+function isSolved(current: Grid, diagonal: boolean): boolean {
+  for (let r = 0; r < 9; r++)
+    for (let c = 0; c < 9; c++) {
+      if (current[r][c] === 0) return false;
+      if (hasConflict(current, r, c, current[r][c], diagonal)) return false;
+    }
+  return true;
+}
+
+function gridsEqual(a: Grid, b: Grid): boolean {
   for (let r = 0; r < 9; r++)
     for (let c = 0; c < 9; c++)
-      if (current[r][c] !== solution[r][c]) return false;
+      if (a[r][c] !== b[r][c]) return false;
   return true;
 }
 
@@ -120,25 +155,29 @@ const HINT_RESET = {
   hintPhase: 0 as const,
   hintTarget: null,
   hintValue: 0,
+  hintMethod: 0,
   hintConstraintCells: [] as [number, number][],
+  hintAltCells: [] as [number, number][],
 };
 
 function reducer(state: GameState, action: Action): GameState {
   switch (action.type) {
     case 'SET_GENERATING':
-      return { ...state, generating: action.value };
+      return { ...state, generating: action.value, generationProgress: action.value ? state.generationProgress : null };
+
+    case 'SET_PROGRESS':
+      return { ...state, generationProgress: action.info };
 
     case 'NEW_GAME': {
-      const { puzzle, solution } = action.result;
+      const { puzzle } = action.result;
       const current = cloneGrid(puzzle);
       const newState: GameState = {
         ...initialState,
         puzzle,
-        solution,
         current,
         difficulty: action.difficulty,
         diagonal: action.diagonal,
-        selectedNum: state.selectedNum,
+        selectedNum: 1,
         status: 'playing',
         generating: false,
       };
@@ -149,6 +188,11 @@ function reducer(state: GameState, action: Action): GameState {
     case 'SELECT_CELL': {
       const { row, col } = action;
       if (state.puzzle[row][col] > 0) return state; // given cell — ignore
+      if (state.status === 'playing' && state.notesMode) {
+        if (state.selectedNum > 0)
+          return reducer(state, { type: 'TOGGLE_NOTE', row, col, digit: state.selectedNum });
+        return { ...state, selectedCell: [row, col] };
+      }
       if (state.status === 'playing') {
         if (state.selectedNum > 0)
           return reducer(state, { type: 'ENTER_VALUE', row, col, val: state.selectedNum });
@@ -161,10 +205,39 @@ function reducer(state: GameState, action: Action): GameState {
       const { num } = action;
       if (state.selectedCell && state.status === 'playing') {
         const [r, c] = state.selectedCell;
-        if (state.puzzle[r][c] === 0)
+        if (state.puzzle[r][c] === 0) {
+          if (state.notesMode && num > 0)
+            return reducer({ ...state, selectedNum: num, ...HINT_RESET }, { type: 'TOGGLE_NOTE', row: r, col: c, digit: num });
+          if (state.notesMode && num === 0) {
+            // eraser in notes mode: clear all notes for selected cell
+            const notes = state.notes.map((nr, ri) =>
+              nr.map((cell, ci) => ri === r && ci === c ? Array(9).fill(false) as boolean[] : cell)
+            );
+            return { ...state, selectedNum: 0, ...HINT_RESET, notes };
+          }
           return reducer({ ...state, selectedNum: num, ...HINT_RESET }, { type: 'ENTER_VALUE', row: r, col: c, val: num });
+        }
       }
       return { ...state, selectedNum: num, ...HINT_RESET };
+    }
+
+    case 'TOGGLE_NOTES_MODE':
+      return { ...state, notesMode: !state.notesMode };
+
+    case 'TOGGLE_NOTE': {
+      const { row, col, digit } = action;
+      if (state.puzzle[row][col] !== 0) return state;
+      if (state.current[row][col] !== 0) return state;
+      const notes = state.notes.map((nr, ri) =>
+        nr.map((cell, ci) =>
+          ri === row && ci === col
+            ? cell.map((v, di) => di === digit - 1 ? !v : v) as boolean[]
+            : cell
+        )
+      );
+      const newState: GameState = { ...state, notes };
+      persist(newState);
+      return newState;
     }
 
     case 'ENTER_VALUE': {
@@ -175,16 +248,18 @@ function reducer(state: GameState, action: Action): GameState {
 
       if (val > 0 && state.current[row][col] === val) val = 0;
 
-      const snap: Snapshot = { current: state.current, errors: state.errors };
-      const history = [...state.history, snap].slice(-MAX_HISTORY);
-
       const current = cloneGrid(state.current);
       current[row][col] = val;
       const errors = cloneGrid(state.errors);
       errors[row][col] = val > 0 && hasConflict(current, row, col, val, state.diagonal) ? 1 : 0;
 
+      const prevSnap = state.history[state.history.length - 1];
+      const history = prevSnap && gridsEqual(current, prevSnap.current)
+        ? state.history.slice(0, -1)
+        : [...state.history, { current: state.current, errors: state.errors }].slice(-MAX_HISTORY);
+
       const flashCells = val > 0 ? computeFlash(row, col, val, current, state.diagonal) : [];
-      const solved = val > 0 && isSolved(current, state.solution);
+      const solved = val > 0 && isSolved(current, state.diagonal);
 
       const newState: GameState = {
         ...state,
@@ -194,6 +269,7 @@ function reducer(state: GameState, action: Action): GameState {
         future: [],
         ...HINT_RESET,
         flashCells,
+        rollbackCell: null,
         status: solved ? 'solved' : 'playing',
       };
       persist(newState);
@@ -204,19 +280,26 @@ function reducer(state: GameState, action: Action): GameState {
       if (state.status !== 'playing') return state;
 
       if (state.hintPhase === 0) {
-        const move = nextLogicalMoveRandom(state.current, state.diagonal, false);
+        const move =
+          nextLogicalMoveRandom(state.current, state.diagonal, false) ??
+          nextLogicalMoveRandom(state.current, state.diagonal, true);
         if (!move) return state;
+        const { constraintCells, altCells } = getConstrainingCellsByMethod(
+          move.row, move.col, move.val, move.method, state.current, state.diagonal,
+        );
         return {
           ...state,
           hintPhase: 1,
           hintTarget: [move.row, move.col],
           hintValue: move.val,
-          hintConstraintCells: getConstrainingCells(move.row, move.col, state.current, state.diagonal),
+          hintMethod: move.method,
+          hintConstraintCells: constraintCells,
+          hintAltCells: altCells,
         };
       }
 
       if (state.hintPhase === 1) {
-        return { ...state, hintPhase: 2 };
+        return { ...state, hintPhase: 2, selectedNum: 0 };
       }
 
       // phase 2 → fill
@@ -230,7 +313,7 @@ function reducer(state: GameState, action: Action): GameState {
       const errors = cloneGrid(state.errors);
       errors[r][c] = 0;
       const flashCells = computeFlash(r, c, hintValue, current, state.diagonal);
-      const solved = isSolved(current, state.solution);
+      const solved = isSolved(current, state.diagonal);
       const newState: GameState = {
         ...state,
         current,
@@ -239,6 +322,8 @@ function reducer(state: GameState, action: Action): GameState {
         future: [],
         ...HINT_RESET,
         flashCells,
+        rollbackCell: null,
+        selectedNum: hintValue,
         status: solved ? 'solved' : 'playing',
       };
       persist(newState);
@@ -257,6 +342,7 @@ function reducer(state: GameState, action: Action): GameState {
         future,
         ...HINT_RESET,
         flashCells: [],
+        rollbackCell: null,
         status: 'playing',
       };
       persist(newState);
@@ -275,6 +361,7 @@ function reducer(state: GameState, action: Action): GameState {
         future: state.future.slice(1),
         ...HINT_RESET,
         flashCells: [],
+        rollbackCell: null,
       };
       persist(newState);
       return newState;
@@ -283,9 +370,62 @@ function reducer(state: GameState, action: Action): GameState {
     case 'CLEAR_FLASH':
       return { ...state, flashCells: [] };
 
-    case 'TICK':
+    case 'CLEAR_NO_ERRORS_NOTICE':
+      return { ...state, noErrorsNotice: false };
+
+    case 'DISMISS_PUZZLE_WARNING':
+      return { ...state, puzzleWarning: null };
+
+    case 'ROLLBACK_TO_ERROR': {
       if (state.status !== 'playing') return state;
-      return { ...state, timer: state.timer + 1 };
+      const solution = solvePuzzle(state.puzzle, state.diagonal);
+      if (!solution) return state;
+
+      // allStates[0] = initial puzzle (before any moves)
+      // allStates[k] = grid after k-th user move
+      const allStates: Grid[] = [...state.history.map(s => s.current), state.current];
+
+      let wrongIndex = -1;
+      outer: for (let k = 1; k < allStates.length; k++) {
+        for (let r = 0; r < 9; r++) {
+          for (let c = 0; c < 9; c++) {
+            if (state.puzzle[r][c] !== 0) continue;
+            const v = allStates[k][r][c];
+            if (v !== 0 && v !== solution[r][c]) { wrongIndex = k; break outer; }
+          }
+        }
+      }
+
+      if (wrongIndex === -1) return { ...state, noErrorsNotice: true };
+
+      const wrongGrid = cloneGrid(allStates[wrongIndex]);
+      const wrongErrors: Grid = Array.from({ length: 9 }, () => Array(9).fill(0));
+      let wrongCell: [number, number] | null = null;
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          if (state.puzzle[r][c] === 0 && wrongGrid[r][c] !== 0 && wrongGrid[r][c] !== solution[r][c]) {
+            wrongErrors[r][c] = 1;
+            if (!wrongCell) wrongCell = [r, c];
+          }
+        }
+      }
+
+      const newState: GameState = {
+        ...state,
+        current: wrongGrid,
+        errors: wrongErrors,
+        history: state.history.slice(0, wrongIndex),
+        future: [],
+        ...HINT_RESET,
+        flashCells: [],
+        noErrorsNotice: false,
+        rollbackCell: wrongCell,
+        selectedCell: null,
+        selectedNum: 0,
+      };
+      persist(newState);
+      return newState;
+    }
 
     default:
       return state;
@@ -295,11 +435,26 @@ function reducer(state: GameState, action: Action): GameState {
 // ── localStorage ──────────────────────────────────────────────────────────────
 
 const STORAGE_KEY = 'sudoku_state';
+const TIMER_KEY   = 'sudoku_timer';
+
+function loadTimer(): number {
+  try {
+    const v = localStorage.getItem(TIMER_KEY);
+    if (v !== null) return Number(v) || 0;
+    // migrate from old format where timer lived inside game state
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? (JSON.parse(raw).timer ?? 0) : 0;
+  } catch { return 0; }
+}
+
+function saveTimer(t: number) {
+  try { localStorage.setItem(TIMER_KEY, String(t)); } catch { /* quota */ }
+}
 
 function persist(state: GameState) {
   try {
-    const { generating, flashCells, hintConstraintCells, ...rest } = state;
-    void generating; void flashCells; void hintConstraintCells;
+    const { generating, flashCells, hintConstraintCells, hintAltCells, noErrorsNotice, rollbackCell, puzzleWarning, notesMode, ...rest } = state;
+    void generating; void flashCells; void hintConstraintCells; void hintAltCells; void noErrorsNotice; void rollbackCell; void puzzleWarning; void notesMode;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
   } catch { /* quota exceeded */ }
 }
@@ -314,27 +469,63 @@ function loadPersistedState(): Partial<GameState> | null {
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
-export function useGame() {
+function buildInitialState(): GameState {
+  const paramStr = readShareParam();
+  if (paramStr) {
+    clearShareParam();
+    const shared = decodeShare(paramStr);
+    if (shared) {
+      const state: GameState = {
+        ...initialState,
+        puzzle: shared.puzzle,
+        current: cloneGrid(shared.puzzle),
+        difficulty: shared.difficulty,
+        diagonal: shared.diagonal,
+        status: 'playing',
+        selectedNum: 1,
+        puzzleWarning: shared.solvableLogically === false
+          ? 'Этот судоку не решается логически — возможно, потребуется перебор'
+          : null,
+      };
+      persist(state);
+      saveTimer(0);
+      return state;
+    }
+  }
   const saved = loadPersistedState();
-  const [state, dispatch] = useReducer(reducer, {
+  return {
     ...initialState,
     ...(saved ?? {}),
     hintPhase: 0,
     hintTarget: null,
     hintValue: 0,
+    hintMethod: 0,
     hintConstraintCells: [],
-    history: (saved as any)?.history ?? [],
-    future: (saved as any)?.future ?? [],
+    hintAltCells: [],
+    history: saved?.history ?? [],
+    future: saved?.future ?? [],
     flashCells: [],
     generating: false,
+    generationProgress: null,
+    noErrorsNotice: false,
+    rollbackCell: null,
     status: saved?.status === 'playing' ? 'playing' : saved?.status === 'solved' ? 'solved' : 'idle',
-  });
+    notes: saved?.notes ?? emptyNotes(),
+    notesMode: false,
+  };
+}
+
+export function useGame() {
+  const [state, dispatch] = useReducer(reducer, undefined, buildInitialState);
+  const [timer, setTimer] = useState(loadTimer);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (state.status === 'playing') {
-      timerRef.current = setInterval(() => dispatch({ type: 'TICK' }), 1000);
+      timerRef.current = setInterval(() => {
+        setTimer((t: number) => { const next = t + 1; saveTimer(next); return next; });
+      }, 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
     }
@@ -349,21 +540,35 @@ export function useGame() {
     }
   }, [state.flashCells]);
 
+  // Auto-clear "no errors" notice after 2.5s
+  useEffect(() => {
+    if (state.noErrorsNotice) {
+      const t = setTimeout(() => dispatch({ type: 'CLEAR_NO_ERRORS_NOTICE' }), 2500);
+      return () => clearTimeout(t);
+    }
+  }, [state.noErrorsNotice]);
+
   const startNewGame = useCallback((difficulty: Difficulty, diagonal: boolean) => {
     dispatch({ type: 'SET_GENERATING', value: true });
-    setTimeout(() => {
-      const result = generatePuzzle({ difficulty, diagonal });
+    generatePuzzle({ difficulty, diagonal }, (info) => {
+      dispatch({ type: 'SET_PROGRESS', info });
+    }).then(result => {
+      setTimer(0);
+      saveTimer(0);
       dispatch({ type: 'NEW_GAME', result, difficulty, diagonal });
-    }, 30);
+    });
   }, []);
 
-  const selectCell  = useCallback((row: number, col: number) => dispatch({ type: 'SELECT_CELL', row, col }), []);
-  const selectNum   = useCallback((num: number) => dispatch({ type: 'SELECT_NUM', num }), []);
-  const hint        = useCallback(() => dispatch({ type: 'HINT' }), []);
-  const undo        = useCallback(() => dispatch({ type: 'UNDO' }), []);
-  const redo        = useCallback(() => dispatch({ type: 'REDO' }), []);
+  const selectCell           = useCallback((row: number, col: number) => dispatch({ type: 'SELECT_CELL', row, col }), []);
+  const selectNum            = useCallback((num: number) => dispatch({ type: 'SELECT_NUM', num }), []);
+  const hint                 = useCallback(() => dispatch({ type: 'HINT' }), []);
+  const undo                 = useCallback(() => dispatch({ type: 'UNDO' }), []);
+  const redo                 = useCallback(() => dispatch({ type: 'REDO' }), []);
+  const rollbackToError      = useCallback(() => dispatch({ type: 'ROLLBACK_TO_ERROR' }), []);
+  const dismissPuzzleWarning = useCallback(() => dispatch({ type: 'DISMISS_PUZZLE_WARNING' }), []);
+  const toggleNotesMode      = useCallback(() => dispatch({ type: 'TOGGLE_NOTES_MODE' }), []);
 
-  return { state, startNewGame, selectCell, selectNum, hint, undo, redo };
+  return { state, timer, startNewGame, selectCell, selectNum, hint, undo, redo, rollbackToError, dismissPuzzleWarning, toggleNotesMode };
 }
 
 export function formatTimer(seconds: number): string {
