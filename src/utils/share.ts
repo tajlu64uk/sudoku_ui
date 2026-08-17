@@ -136,8 +136,11 @@ export function decodeShare(encoded: string): SharedState | null {
   }
 }
 
+const WEB_BASE = 'https://tr.spb.ru/sudoku/';
+
 export function buildShareUrl(state: SharedState): string {
-  const url = new URL(window.location.href);
+  const base = window.location.protocol === 'capacitor:' ? WEB_BASE : window.location.href;
+  const url = new URL(base);
   url.search = '';
   url.searchParams.set(PARAM, encodeShare(state));
   return url.toString();
