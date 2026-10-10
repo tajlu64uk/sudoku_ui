@@ -142,6 +142,12 @@ export function buildCandidatesAdvanced(grid: Grid, diagonal: boolean): Candidat
   let changed = true;
   while (changed) {
     changed = false;
+    // Frozen snapshot of this pass's starting state: all pattern-detection reads
+    // below use `prevV`, so an elimination made earlier in this same pass by an
+    // unrelated technique can never mask/break a still-valid pattern (e.g. a
+    // naked pair) detected later in the same pass. Removals still accumulate
+    // into the live `V`.
+    const prevV = cloneCandidates(V);
     for (let br = 0; br < 3; br++) {
       for (let bc = 0; bc < 3; bc++) {
         const r0 = br * 3, c0 = bc * 3;
@@ -149,21 +155,21 @@ export function buildCandidatesAdvanced(grid: Grid, diagonal: boolean): Candidat
         // Naked pairs in box
         for (let r = r0; r < r0 + 3; r++) {
           for (let c = c0; c < c0 + 3; c++) {
-            if (grid[r][c] !== 0 || countCands(V, r, c) !== 2) continue;
+            if (grid[r][c] !== 0 || countCands(prevV, r, c) !== 2) continue;
             for (let r2 = r0; r2 < r0 + 3; r2++) {
               for (let c2 = c0; c2 < c0 + 3; c2++) {
                 if (r2 < r || (r2 === r && c2 <= c)) continue;
-                if (grid[r2][c2] !== 0 || countCands(V, r2, c2) !== 2) continue;
-                if (!equalCands(V, r, c, r2, c2)) continue;
+                if (grid[r2][c2] !== 0 || countCands(prevV, r2, c2) !== 2) continue;
+                if (!equalCands(prevV, r, c, r2, c2)) continue;
                 for (let d = 0; d < 9; d++) {
-                  if (!V[r][c][d]) continue;
+                  if (!prevV[r][c][d]) continue;
                   for (let rr = r0; rr < r0 + 3; rr++)
                     for (let cc = c0; cc < c0 + 3; cc++) {
                       if ((rr === r && cc === c) || (rr === r2 && cc === c2)) continue;
                       if (V[rr][cc][d]) {
-                        V[rr][cc][d] = false; 
+                        V[rr][cc][d] = false;
                         changed = true;
-                        //console.log(`[advanced] Naked pair [${r+1},${c+1}]+[${r2+1},${c2+1}] in box → убран ${d+1} из [${rr+1},${cc+1}]`); 
+                        //console.log(`[advanced] Naked pair [${r+1},${c+1}]+[${r2+1},${c2+1}] in box → убран ${d+1} из [${rr+1},${cc+1}]`);
                       }
                     }
                 }
@@ -177,7 +183,7 @@ export function buildCandidatesAdvanced(grid: Grid, diagonal: boolean): Candidat
           let fR = -1, fC = -1, sameR = true, sameC = true, cnt = 0;
           for (let r = r0; r < r0 + 3; r++)
             for (let c = c0; c < c0 + 3; c++)
-              if (V[r][c][d]) {
+              if (prevV[r][c][d]) {
                 if (fR === -1) { fR = r; fC = c; }
                 else { if (r !== fR) sameR = false; if (c !== fC) sameC = false; }
                 cnt++;
@@ -185,18 +191,18 @@ export function buildCandidatesAdvanced(grid: Grid, diagonal: boolean): Candidat
           if (cnt > 1 && fR !== -1) {
             if (sameR) for (let c = 0; c < 9; c++) {
               if (c >= c0 && c < c0 + 3) continue;
-              if (V[fR][c][d]) { 
-                V[fR][c][d] = false; 
+              if (V[fR][c][d]) {
+                V[fR][c][d] = false;
                 changed = true;
-                //console.log(`[advanced] Box-line: цифра ${d+1} в блоке[${br+1},${bc+1}] заперта в строке ${fR+1} → убран из [${fR+1},${c+1}]`); 
+                //console.log(`[advanced] Box-line: цифра ${d+1} в блоке[${br+1},${bc+1}] заперта в строке ${fR+1} → убран из [${fR+1},${c+1}]`);
               }
             }
             if (sameC) for (let r = 0; r < 9; r++) {
               if (r >= r0 && r < r0 + 3) continue;
-              if (V[r][fC][d]) { 
-                V[r][fC][d] = false; 
+              if (V[r][fC][d]) {
+                V[r][fC][d] = false;
                 changed = true;
-                //console.log(`[advanced] Box-line: цифра ${d+1} в блоке[${br+1},${bc+1}] заперта в столбце ${fC+1} → убран из [${r+1},${fC+1}]`); 
+                //console.log(`[advanced] Box-line: цифра ${d+1} в блоке[${br+1},${bc+1}] заперта в столбце ${fC+1} → убран из [${r+1},${fC+1}]`);
               }
             }
           }
@@ -210,7 +216,7 @@ export function buildCandidatesAdvanced(grid: Grid, diagonal: boolean): Candidat
               let cntTotal = 0, cntDiag = 0;
               for (let r = r0; r < r0 + 3; r++)
                 for (let c = c0; c < c0 + 3; c++)
-                  if (V[r][c][d]) { cntTotal++; if (r === c) cntDiag++; }
+                  if (prevV[r][c][d]) { cntTotal++; if (r === c) cntDiag++; }
               if (cntTotal > 0 && cntTotal === cntDiag)
                 for (let k = 0; k < 9; k++) {
                   if (k >= r0 && k < r0 + 3) continue;
@@ -218,9 +224,9 @@ export function buildCandidatesAdvanced(grid: Grid, diagonal: boolean): Candidat
                 }
               // Reverse: if all main-diagonal candidates are in this box → remove from non-diag cells
               let cntDiagTotal = 0;
-              for (let k = 0; k < 9; k++) if (V[k][k][d]) cntDiagTotal++;
+              for (let k = 0; k < 9; k++) if (prevV[k][k][d]) cntDiagTotal++;
               let cntDiagInBox = 0;
-              for (let k = r0; k < r0 + 3; k++) if (V[k][k][d]) cntDiagInBox++;
+              for (let k = r0; k < r0 + 3; k++) if (prevV[k][k][d]) cntDiagInBox++;
               if (cntDiagTotal > 0 && cntDiagTotal === cntDiagInBox)
                 for (let r = r0; r < r0 + 3; r++)
                   for (let c = c0; c < c0 + 3; c++) {
@@ -233,7 +239,7 @@ export function buildCandidatesAdvanced(grid: Grid, diagonal: boolean): Candidat
               let cntTotal = 0, cntAnti = 0;
               for (let r = r0; r < r0 + 3; r++)
                 for (let c = c0; c < c0 + 3; c++)
-                  if (V[r][c][d]) { cntTotal++; if (r + c === 8) cntAnti++; }
+                  if (prevV[r][c][d]) { cntTotal++; if (r + c === 8) cntAnti++; }
               if (cntTotal > 0 && cntTotal === cntAnti)
                 for (let k = 0; k < 9; k++) {
                   if (k >= r0 && k < r0 + 3) continue;
@@ -241,9 +247,9 @@ export function buildCandidatesAdvanced(grid: Grid, diagonal: boolean): Candidat
                 }
               // Reverse: if all anti-diagonal candidates are in this box → remove from non-anti-diag cells
               let cntAntiTotal = 0;
-              for (let k = 0; k < 9; k++) if (V[k][8 - k][d]) cntAntiTotal++;
+              for (let k = 0; k < 9; k++) if (prevV[k][8 - k][d]) cntAntiTotal++;
               let cntAntiInBox = 0;
-              for (let k = r0; k < r0 + 3; k++) if (V[k][8 - k][d]) cntAntiInBox++;
+              for (let k = r0; k < r0 + 3; k++) if (prevV[k][8 - k][d]) cntAntiInBox++;
               if (cntAntiTotal > 0 && cntAntiTotal === cntAntiInBox)
                 for (let r = r0; r < r0 + 3; r++)
                   for (let c = c0; c < c0 + 3; c++) {
@@ -259,18 +265,18 @@ export function buildCandidatesAdvanced(grid: Grid, diagonal: boolean): Candidat
     // Naked pairs in columns
     for (let c = 0; c < 9; c++)
       for (let r = 0; r < 9; r++) {
-        if (grid[r][c] !== 0 || countCands(V, r, c) !== 2) continue;
+        if (grid[r][c] !== 0 || countCands(prevV, r, c) !== 2) continue;
         for (let r2 = r + 1; r2 < 9; r2++) {
-          if (grid[r2][c] !== 0 || countCands(V, r2, c) !== 2) continue;
-          if (!equalCands(V, r, c, r2, c)) continue;
+          if (grid[r2][c] !== 0 || countCands(prevV, r2, c) !== 2) continue;
+          if (!equalCands(prevV, r, c, r2, c)) continue;
           for (let d = 0; d < 9; d++) {
-            if (!V[r][c][d]) continue;
+            if (!prevV[r][c][d]) continue;
             for (let rr = 0; rr < 9; rr++) {
               if (rr === r || rr === r2) continue;
-                if (V[rr][c][d]) { 
-                  V[rr][c][d] = false; 
+                if (V[rr][c][d]) {
+                  V[rr][c][d] = false;
                   changed = true;
-                  //console.log(`[advanced] Naked pair [${r+1},${c+1}]+[${r2+1},${c+1}] в столбце ${c+1} → убран ${d+1} из [${rr+1},${c+1}]`); 
+                  //console.log(`[advanced] Naked pair [${r+1},${c+1}]+[${r2+1},${c+1}] в столбце ${c+1} → убран ${d+1} из [${rr+1},${c+1}]`);
                 }
             }
           }
@@ -280,18 +286,18 @@ export function buildCandidatesAdvanced(grid: Grid, diagonal: boolean): Candidat
     // Naked pairs in rows
     for (let r = 0; r < 9; r++)
       for (let c = 0; c < 9; c++) {
-        if (grid[r][c] !== 0 || countCands(V, r, c) !== 2) continue;
+        if (grid[r][c] !== 0 || countCands(prevV, r, c) !== 2) continue;
         for (let c2 = c + 1; c2 < 9; c2++) {
-          if (grid[r][c2] !== 0 || countCands(V, r, c2) !== 2) continue;
-          if (!equalCands(V, r, c, r, c2)) continue;
+          if (grid[r][c2] !== 0 || countCands(prevV, r, c2) !== 2) continue;
+          if (!equalCands(prevV, r, c, r, c2)) continue;
           for (let d = 0; d < 9; d++) {
-            if (!V[r][c][d]) continue;
+            if (!prevV[r][c][d]) continue;
             for (let cc = 0; cc < 9; cc++) {
               if (cc === c || cc === c2) continue;
-              if (V[r][cc][d]) { 
-                V[r][cc][d] = false; 
+              if (V[r][cc][d]) {
+                V[r][cc][d] = false;
                 changed = true;
-                //console.log(`[advanced] Naked pair [${r+1},${c+1}]+[${r+1},${c2+1}] в строке ${r+1} → убран ${d+1} из [${r+1},${cc+1}]`); 
+                //console.log(`[advanced] Naked pair [${r+1},${c+1}]+[${r+1},${c2+1}] в строке ${r+1} → убран ${d+1} из [${r+1},${cc+1}]`);
               }
             }
           }
@@ -301,36 +307,36 @@ export function buildCandidatesAdvanced(grid: Grid, diagonal: boolean): Candidat
     // Naked pairs on diagonals
     if (diagonal) {
       for (let k = 0; k < 9; k++) {
-        if (grid[k][k] !== 0 || countCands(V, k, k) !== 2) continue;
+        if (grid[k][k] !== 0 || countCands(prevV, k, k) !== 2) continue;
         for (let k2 = k + 1; k2 < 9; k2++) {
-          if (grid[k2][k2] !== 0 || countCands(V, k2, k2) !== 2) continue;
-          if (!equalCands(V, k, k, k2, k2)) continue;
+          if (grid[k2][k2] !== 0 || countCands(prevV, k2, k2) !== 2) continue;
+          if (!equalCands(prevV, k, k, k2, k2)) continue;
           for (let d = 0; d < 9; d++) {
-            if (!V[k][k][d]) continue;
+            if (!prevV[k][k][d]) continue;
             for (let kk = 0; kk < 9; kk++) {
               if (kk === k || kk === k2) continue;
-              if (V[kk][kk][d]) { 
-                V[kk][kk][d] = false; 
+              if (V[kk][kk][d]) {
+                V[kk][kk][d] = false;
                 changed = true;
-                //console.log(`[advanced] Naked pair [${k+1},${k+1}]+[${k2+1},${k2+1}] на главной диагонали → убран ${d+1} из [${kk+1},${kk+1}]`); 
+                //console.log(`[advanced] Naked pair [${k+1},${k+1}]+[${k2+1},${k2+1}] на главной диагонали → убран ${d+1} из [${kk+1},${kk+1}]`);
               }
             }
           }
         }
       }
       for (let k = 0; k < 9; k++) {
-        if (grid[k][8 - k] !== 0 || countCands(V, k, 8 - k) !== 2) continue;
+        if (grid[k][8 - k] !== 0 || countCands(prevV, k, 8 - k) !== 2) continue;
         for (let k2 = k + 1; k2 < 9; k2++) {
-          if (grid[k2][8 - k2] !== 0 || countCands(V, k2, 8 - k2) !== 2) continue;
-          if (!equalCands(V, k, 8 - k, k2, 8 - k2)) continue;
+          if (grid[k2][8 - k2] !== 0 || countCands(prevV, k2, 8 - k2) !== 2) continue;
+          if (!equalCands(prevV, k, 8 - k, k2, 8 - k2)) continue;
           for (let d = 0; d < 9; d++) {
-            if (!V[k][8 - k][d]) continue;
+            if (!prevV[k][8 - k][d]) continue;
             for (let kk = 0; kk < 9; kk++) {
               if (kk === k || kk === k2) continue;
-              if (V[kk][8 - kk][d]) { 
-                V[kk][8 - kk][d] = false; 
-                changed = true; 
-                //console.log(`[advanced] Naked pair [${k+1},${8-k+1}]+[${k2+1},${8-k2+1}] на побочной диагонали → убран ${d+1} из [${kk+1},${8-kk+1}]`); 
+              if (V[kk][8 - kk][d]) {
+                V[kk][8 - kk][d] = false;
+                changed = true;
+                //console.log(`[advanced] Naked pair [${k+1},${8-k+1}]+[${k2+1},${8-k2+1}] на побочной диагонали → убран ${d+1} из [${kk+1},${8-kk+1}]`);
               }
             }
           }
@@ -1030,20 +1036,33 @@ export function getConstrainingCellsByMethod(
 export function solvePuzzle(puzzle: Grid, diagonal: boolean): Grid | null {
   const grid = cloneGrid(puzzle);
   function bt(): boolean {
-    for (let r = 0; r < 9; r++) {
+    // MRV: branch on the empty cell with the fewest legal candidates instead of
+    // scanning in raster order — plain raster-order backtracking blows up
+    // combinatorially on sparse/hard grids.
+    let bestR = -1, bestC = -1;
+    let bestCandidates: number[] = [];
+    scan: for (let r = 0; r < 9; r++) {
       for (let c = 0; c < 9; c++) {
         if (grid[r][c] !== 0) continue;
+        const candidates: number[] = [];
         for (let d = 1; d <= 9; d++) {
-          if (!hasConflict(grid, r, c, d, diagonal)) {
-            grid[r][c] = d;
-            if (bt()) return true;
-            grid[r][c] = 0;
-          }
+          if (!hasConflict(grid, r, c, d, diagonal)) candidates.push(d);
         }
-        return false;
+        if (candidates.length === 0) return false;
+        if (bestR === -1 || candidates.length < bestCandidates.length) {
+          bestR = r; bestC = c; bestCandidates = candidates;
+          if (candidates.length === 1) break scan;
+        }
       }
     }
-    return true;
+    if (bestR === -1) return true; // no empty cells left — solved
+
+    for (const d of bestCandidates) {
+      grid[bestR][bestC] = d;
+      if (bt()) return true;
+      grid[bestR][bestC] = 0;
+    }
+    return false;
   }
   return bt() ? grid : null;
 }

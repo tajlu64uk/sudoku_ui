@@ -381,22 +381,32 @@ function reducer(state: GameState, action: Action): GameState {
       const solution = solvePuzzle(state.puzzle, state.diagonal);
       if (!solution) return state;
 
+      // Only cells still wrong right now matter — a value the player typed and later
+      // erased/corrected themselves (without Undo) must not trigger a rollback.
+      const currentWrongCells: [number, number][] = [];
+      for (let r = 0; r < 9; r++) {
+        for (let c = 0; c < 9; c++) {
+          if (state.puzzle[r][c] !== 0) continue;
+          const v = state.current[r][c];
+          if (v !== 0 && v !== solution[r][c]) currentWrongCells.push([r, c]);
+        }
+      }
+
+      if (currentWrongCells.length === 0) return { ...state, noErrorsNotice: true };
+
       // allStates[0] = initial puzzle (before any moves)
       // allStates[k] = grid after k-th user move
       const allStates: Grid[] = [...state.history.map(s => s.current), state.current];
 
-      let wrongIndex = -1;
-      outer: for (let k = 1; k < allStates.length; k++) {
-        for (let r = 0; r < 9; r++) {
-          for (let c = 0; c < 9; c++) {
-            if (state.puzzle[r][c] !== 0) continue;
-            const v = allStates[k][r][c];
-            if (v !== 0 && v !== solution[r][c]) { wrongIndex = k; break outer; }
-          }
-        }
+      // For each cell still wrong now, find the move that set it to its current value
+      // (walking back while the value stays unchanged), then roll back to the earliest of those.
+      let wrongIndex = allStates.length - 1;
+      for (const [r, c] of currentWrongCells) {
+        const v = state.current[r][c];
+        let k = allStates.length - 1;
+        while (k > 0 && allStates[k - 1][r][c] === v) k--;
+        wrongIndex = Math.min(wrongIndex, k);
       }
-
-      if (wrongIndex === -1) return { ...state, noErrorsNotice: true };
 
       const wrongGrid = cloneGrid(allStates[wrongIndex]);
       const wrongErrors: Grid = Array.from({ length: 9 }, () => Array(9).fill(0));
